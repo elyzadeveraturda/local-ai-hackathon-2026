@@ -124,23 +124,6 @@ SOLOOPS_DB_PATH=demo.db uvicorn main:app --host 127.0.0.1 --port 8000
 
 The seeder refuses to touch the real `soloops.db` (unless `--allow-main-db`) and refuses non-empty databases; it never deletes anything.
 
-## 60–90 second demo script
-
-> **(0:00)** "Meet a college student who's also running a camera rental, helping with the family's rental property, and posting on TikTok. Four roles, one brain — and no assistant. SoloOps AI is that assistant, and it runs entirely on this laptop." *(Wi-Fi off in menu bar)*
->
-> **(0:12)** "Each role is a Space — Academic, Business, Content, Personal." *(My Spaces, show the four cards)*
->
-> **(0:20)** "Anything that lands on my plate, I paste into AI Capture. A scholarship notice…" *(paste, Analyze with Local AI)* "…qwen2.5 running locally pulls out the action and the October 15 deadline. It never invents details, and I review before saving." *(Save)* "Same for a camera booking — Maria, Saturday, 3 PM." *(capture + save)*
->
-> **(0:40)** "Today's Attention ranks everything across every space with plain code: overdue, today, next three days." *(Dashboard)*
->
-> **(0:45)** "'Plan my day' — local AI reads my saved tasks and free time and proposes time blocks; I add one to the calendar with a click." *(Plan my day → Add to calendar)*
->
-> **(0:55)** "Ask SoloOps: what should I prioritize today?" *(ask)* "The answer separates what's actually saved from AI suggestions — it only knows what I chose to save, and nothing leaves my machine."
->
-> **(1:10)** "Time to work: Lock In on the scholarship task. Local AI builds a checklist from the task and my space, and the Pomodoro timer starts — it floats over every page and can pop out to its own always-on-top window." *(Generate Plan, Start, tick a step, Mark Complete)*
->
-> **(1:20)** "One person. Multiple roles. One private AI assistant. That's SoloOps AI."
 
 ## Project structure
 
