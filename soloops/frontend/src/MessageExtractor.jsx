@@ -33,14 +33,17 @@ function draftFromResult(result) {
     subject: result.subject || "",
     due_date: result.due_date || "",
     due_time: result.due_time || "",
+    end_time: result.end_time || "",
     amount: result.amount ?? "",
     notes: result.notes || "",
   };
 }
 
-export default function MessageExtractor() {
+export default function MessageExtractor({ initialSpaceId, onChanged }) {
   const [businesses, setBusinesses] = useState([]);
-  const [businessId, setBusinessId] = useState("");
+  const [businessId, setBusinessId] = useState(
+    initialSpaceId ? String(initialSpaceId) : ""
+  );
   const [message, setMessage] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +59,7 @@ export default function MessageExtractor() {
         const data = await apiFetch("/businesses");
         setBusinesses(data);
 
-        if (data.length > 0) {
+        if (data.length > 0 && !initialSpaceId) {
           setBusinessId(String(data[0].id));
         }
       } catch (err) {
@@ -65,7 +68,7 @@ export default function MessageExtractor() {
     }
 
     loadBusinesses();
-  }, []);
+  }, [initialSpaceId]);
 
   async function extractMessage() {
     if (!businessId || !message.trim()) return;
@@ -128,11 +131,13 @@ export default function MessageExtractor() {
           item: draft.subject.trim() || null,
           due_date: draft.due_date || null,
           due_time: draft.due_time || null,
+          end_time: draft.end_time || null,
           amount: draft.amount === "" ? null : Number(draft.amount),
           notes,
         }),
       });
       setSavedTask(task);
+      onChanged?.();
     } catch (err) {
       setSaveError(err.message);
     } finally {
@@ -302,6 +307,15 @@ export default function MessageExtractor() {
                 value={draft.due_time}
                 disabled={!!savedTask}
                 onChange={(e) => updateDraft("due_time", e.target.value)}
+              />
+            </label>
+            <label>
+              End time
+              <input
+                type="time"
+                value={draft.end_time}
+                disabled={!!savedTask}
+                onChange={(e) => updateDraft("end_time", e.target.value)}
               />
             </label>
             <label>
