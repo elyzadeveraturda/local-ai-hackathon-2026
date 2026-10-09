@@ -325,3 +325,245 @@ body {
 .extractor-error {
   color: #b42318;
 }
+
+.stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.stat-card strong.danger {
+  color: #b42318;
+}
+
+.muted {
+  color: #777d91;
+}
+
+.attention {
+  background: white;
+  padding: 25px;
+  border-radius: 16px;
+  border: 1px solid #eceef5;
+  margin-top: 25px;
+}
+
+.attention-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.attention-header h2 {
+  margin: 0;
+}
+
+.attention-header small {
+  color: #777d91;
+}
+
+.attention-group {
+  margin-top: 18px;
+}
+
+.bucket {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 8px;
+}
+
+.bucket span {
+  background: #eceef5;
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.bucket-overdue { color: #b42318; }
+.bucket-today { color: #b54708; }
+.bucket-soon { color: #6654d9; }
+.bucket-later,
+.bucket-no_date { color: #777d91; }
+
+.task-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid #eceef5;
+}
+
+.task-row.completed strong {
+  text-decoration: line-through;
+  color: #888da1;
+}
+
+.task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-main small,
+.lockin-task small {
+  color: #777d91;
+}
+
+.business-pill {
+  background: #f5f3ff;
+  color: #6654d9;
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-weight: 600;
+}
+
+.due {
+  font-size: 13px;
+  color: #777d91;
+  white-space: nowrap;
+}
+
+.due-overdue { color: #b42318; font-weight: 600; }
+.due-today { color: #b54708; font-weight: 600; }
+
+.task-actions,
+.business-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-actions button,
+.link-button {
+  border: 1px solid #dcdfea;
+  background: white;
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.task-actions button:first-child {
+  background: #6654d9;
+  border-color: #6654d9;
+  color: white;
+}
+
+.link-button {
+  border: none;
+  color: #6654d9;
+  padding: 0;
+}
+
+.task-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.extractor-card .task-form label {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 0;
+}
+
+.task-form input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 11px;
+  border: 1px solid #dcdfea;
+  border-radius: 9px;
+  font: inherit;
+  font-weight: 400;
+}
+
+.save-success {
+  background: #e8f8ed;
+  color: #1f6b3d;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+}
+
+.save-success button {
+  margin-top: 6px;
+}
+
+.lockin-page {
+  max-width: 1000px;
+}
+
+.lockin-task {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lockin-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+}
+
+.timer-card {
+  text-align: center;
+}
+
+.timer {
+  font-size: 64px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 10px 0 20px;
+  color: #171b32;
+}
+
+.timer-card .business-actions {
+  justify-content: center;
+}
+
+.plan-goal {
+  margin-bottom: 4px;
+}
+
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 22px;
+}
+
+.checklist li {
+  padding: 10px 0;
+  border-bottom: 1px solid #eceef5;
+}
+
+.extractor-card .checklist label {
+  display: flex;
+  gap: 10px;
+  font-weight: 400;
+  margin: 0;
+  cursor: pointer;
+}
+
+.checklist li.done label {
+  text-decoration: line-through;
+  color: #888da1;
+}
+
+.extractor-card .complete-button {
+  background: #27834b;
+  display: block;
+  margin-top: 16px;
+}
+
+@media (max-width: 800px) {
+  .lockin-grid,
+  .task-row {
+    grid-template-columns: 1fr;
+  }
+}

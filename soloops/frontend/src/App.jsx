@@ -1,10 +1,11 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import Businesses from "./Businesses";
 import MessageExtractor from "./MessageExtractor";
-
-const API = "http://127.0.0.1:8000";
+import Attention from "./Attention";
+import LockIn from "./LockIn";
+import { API } from "./api";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -13,7 +14,23 @@ function App() {
   const [reply, setReply] = useState("");
   const [loading, setLoading] = useState(false);
   const [aiOnline, setAiOnline] = useState(false);
-  
+  const [counts, setCounts] = useState(null);
+  const [lockInTaskId, setLockInTaskId] = useState(null);
+
+  const handleAttention = useCallback((data) => setCounts(data.counts), []);
+
+  function openLockIn(taskId) {
+    setLockInTaskId(taskId ?? null);
+    setPage("lockin");
+  }
+
+  useEffect(() => {
+    if (page !== "dashboard") return;
+    fetch(`${API}/businesses`)
+      .then((res) => res.json())
+      .then((data) => setBusinessCount(data.length))
+      .catch(() => {});
+  }, [page]);
 
   useEffect(() => {
     fetch(`${API}/health`)
@@ -79,8 +96,12 @@ function App() {
           ✦ AI Extraction
         </button>
 
-        <div>▤ Calendar</div>
-        <div>◷ Lock In Mode</div>
+        <button
+          className={page === "lockin" ? "nav-active" : ""}
+          onClick={() => openLockIn(null)}
+        >
+          ◷ Lock In Mode
+        </button>
       </nav>
 
         <div className="sidebar-bottom">
@@ -117,21 +138,32 @@ function App() {
 </div>
           <div className="stat-card">
             <span>Pending Tasks</span>
-            <strong>0</strong>
+            <strong>{counts ? counts.pending : "–"}</strong>
             <small>Across all businesses</small>
           </div>
           <div className="stat-card">
-            <span>Schedule Conflicts</span>
-            <strong>0</strong>
-            <small>No conflicts detected</small>
+            <span>Overdue</span>
+            <strong className={counts?.overdue ? "danger" : ""}>
+              {counts ? counts.overdue : "–"}
+            </strong>
+            <small>Past their due date</small>
+          </div>
+          <div className="stat-card">
+            <span>Due Today / Next 3 Days</span>
+            <strong>
+              {counts ? `${counts.due_today} / ${counts.upcoming}` : "–"}
+            </strong>
+            <small>Upcoming deadlines</small>
           </div>
         </section>
+
+        <Attention onLockIn={openLockIn} onData={handleAttention} />
 
         <section className="ai-panel">
           <h2>✦ Ask SoloOps AI</h2>
           <p>
-            Ask your private local assistant for
-            help organizing your work.
+            Ask about your saved tasks and deadlines. Answers are
+            grounded in your local SoloOps records.
           </p>
 
           <textarea
@@ -157,6 +189,8 @@ function App() {
           <Businesses onCountChange={setBusinessCount} />
         ) : page === "extract" ? (
           <MessageExtractor />
+        ) : page === "lockin" ? (
+          <LockIn key={lockInTaskId ?? "none"} initialTaskId={lockInTaskId} />
         ) : null}
       </main>
     </div>
