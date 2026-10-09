@@ -525,7 +525,7 @@ def describe_task(task):
         f"Item/service: {task.get('item') or 'n/a'}",
         f"Due date: {task.get('due_date') or 'n/a'}",
         f"Due time: {task.get('due_time') or 'n/a'}",
-        f"Amount: {task['amount'] if task.get('amount') is not None else 'n/a'}",
+        f"Amount: {format(task['amount'], 'g') if task.get('amount') is not None else 'n/a'}",
         f"Notes: {task.get('notes') or 'n/a'}",
     ]
     return "\n".join(lines)
