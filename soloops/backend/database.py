@@ -12,6 +12,7 @@ def get_connection():
     return conn
 
 
+
 def init_db():
     with get_connection() as conn:
         conn.execute("""
@@ -24,7 +25,28 @@ def init_db():
                     DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                business_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                customer TEXT,
+                item TEXT,
+                due_date TEXT,
+                amount REAL,
+                notes TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (business_id)
+                    REFERENCES businesses(id)
+                    ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
+
+
 
 
 def list_businesses():
@@ -86,3 +108,58 @@ def delete_business(business_id):
         )
         conn.commit()
         return cursor.rowcount > 0
+    
+
+def create_task(
+    business_id, title, customer=None, item=None,
+    due_date=None, amount=None, notes=""
+):
+    with get_connection() as conn:
+        cursor = conn.execute("""
+            INSERT INTO tasks
+            (business_id, title, customer, item,
+             due_date, amount, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            business_id, title, customer, item,
+            due_date, amount, notes
+        ))
+        conn.commit()
+        task_id = cursor.lastrowid
+
+    return get_task(task_id)
+
+
+def get_task(task_id):
+    with get_connection() as conn:
+        row = conn.execute("""
+            SELECT * FROM tasks WHERE id = ?
+        """, (task_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_tasks():
+    with get_connection() as conn:
+        rows = conn.execute("""
+            SELECT tasks.*, businesses.name AS business_name
+            FROM tasks
+            JOIN businesses ON businesses.id = tasks.business_id
+            ORDER BY
+                CASE WHEN tasks.status = 'pending' THEN 0 ELSE 1 END,
+                CASE WHEN tasks.due_date IS NULL THEN 1 ELSE 0 END,
+                tasks.due_date ASC,
+                tasks.id DESC
+        """).fetchall()
+        return [dict(row) for row in rows]
+
+
+def complete_task(task_id):
+    with get_connection() as conn:
+        cursor = conn.execute("""
+            UPDATE tasks
+            SET status = 'completed'
+            WHERE id = ?
+        """, (task_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+

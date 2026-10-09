@@ -168,6 +168,58 @@ body {
   overflow-wrap: anywhere;
 }
 
+.business-form {
+  display: grid;
+  gap: 12px;
+  margin: 25px 0;
+  max-width: 650px;
+  background: white;
+  padding: 24px;
+  border: 1px solid #eceef5;
+  border-radius: 16px;
+}
+
+.business-form input,
+.business-form textarea {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #dcdfea;
+  border-radius: 9px;
+  font: inherit;
+}
+
+.business-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.business-card {
+  background: white;
+  padding: 24px;
+  border: 1px solid #eceef5;
+  border-radius: 16px;
+}
+
+.sidebar nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: #b7bed5;
+  padding: 13px;
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.sidebar nav button.nav-active {
+  background: #35345c;
+  color: white;
+}
+
 @media (max-width: 800px) {
   .app {
     flex-direction: column;
@@ -189,4 +241,87 @@ body {
   .stats {
     grid-template-columns: 1fr;
   }
+}
+
+
+.extractor-page {
+  max-width: 900px;
+}
+
+.extractor-page > p {
+  color: #777d91;
+  margin-bottom: 25px;
+}
+
+.extractor-card {
+  background: white;
+  padding: 28px;
+  border: 1px solid #eceef5;
+  border-radius: 16px;
+  margin-bottom: 20px;
+}
+
+.extractor-card label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.extractor-card select,
+.extractor-card textarea {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  margin-bottom: 22px;
+  border: 1px solid #dcdfea;
+  border-radius: 10px;
+  font: inherit;
+  background: white;
+}
+
+.extractor-card button {
+  background: #6654d9;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 13px 22px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.extractor-card button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.extracted-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.extracted-field {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid #eceef5;
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+
+.extracted-field strong {
+  text-transform: capitalize;
+}
+
+.extracted-field span {
+  text-align: right;
+}
+
+.confirmation-note {
+  color: #777d91;
+  font-size: 13px;
+  margin-top: 20px;
+}
+
+.extractor-error {
+  color: #b42318;
 }
