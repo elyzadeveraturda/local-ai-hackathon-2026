@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SoloOps local data and build output
+soloops/backend/*.db
+soloops/backend/*.db-journal
+node_modules/
+dist/
