@@ -112,10 +112,10 @@ def chat(request: ChatRequest):
     ) or "- none"
     pending = build_attention(list_tasks(), ph_today())["tasks"][:25]
     tasks_text = "\n".join(
-        f"- [{t['priority_label']}] {t['title']} | business: "
+        f"{i}. [{t['priority_label']}] {t['title']} | business: "
         f"{t['business_name']} | customer: {t.get('customer') or 'n/a'} | "
         f"due: {describe_due(t)}"
-        for t in pending
+        for i, t in enumerate(pending, start=1)
     ) or "- none"
 
     prompt = f"""
@@ -140,7 +140,9 @@ Today's date (Philippines): {ph_today().isoformat()}
 Saved businesses:
 {businesses_text}
 
-Pending tasks (already sorted by priority):
+Pending tasks, numbered in priority order (1 = most urgent).
+When recommending what to focus on, follow this order exactly:
+overdue tasks come before everything else.
 {tasks_text}
 
 User message:
