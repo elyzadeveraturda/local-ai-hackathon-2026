@@ -12,7 +12,22 @@ SoloOps AI is a private, local-first assistant for one person juggling many role
 - **AI Capture** — paste any text or message (school notices, booking requests, content to-dos, personal reminders); local AI extracts `record_type`, `title`, `person`, `subject`, `due_date`, `due_time`, `end_time`, `amount` and `notes`, using the selected space's name/category/type/description as context. Deterministic guards post-process the model output: relative weekday phrases ("next Tuesday", "by Friday") are resolved to real dates in code, time ranges become start/end times, hallucinated dates/amounts/people with no textual evidence are nulled, and titles are stripped of date/time fragments.
 - **Review & Save as Task** — every extracted field is editable before saving; validation, clear errors, and duplicate-save protection (UI lock + backend `409`).
 - **Ask SoloOps (Assistant)** — grounded Q&A over your saved records, scoped to **All Spaces** or a **Selected Space**. Only saved records are treated as facts: answers start with "From your saved records:" (task titles, spaces, due status) followed by clearly-labelled "Suggestions:". It can explain schedule conflicts, suggest options and draft short messages — but it never changes, moves, cancels or confirms anything. Conversations are never stored.
-- **Focus mode** — a distraction-free full-screen view: pick one task, get a context-aware focus plan from local AI (tailored to the space's category — studying, content editing, customer follow-up, errands), a 25-minute Pomodoro timer with a progress bar, a tickable checklist, and a deterministic fallback checklist if Ollama is down.
+- **Focus mode** — a distraction-free full-screen view: pick one task, get a context-aware focus plan from local AI (tailored to the space's category — studying, content editing, customer follow-up, errands), a Pomodoro timer (5/15/25/50 min or custom) with a progress bar, a tickable checklist, and a deterministic fallback checklist if Ollama is down.
+
+- **Floating Pomodoro** — the same shared timer floats over every page: a small round button that becomes a live pill while running, expands into a mini timer card with presets and an optional linked task, counts down in the browser tab title, survives reloads, and can pop out into an always-on-top Picture-in-Picture window (Chrome) so it floats over other tabs and apps.
+
+- **Whole-day & multi-day tasks** — every task form has a "Whole day" switch: date-only tasks for appointments and deadlines, multi-day spans for trips or exam weeks (shown in the calendar's all-day row across every covered day), and timed events with start/end times.
+
+- **Calendar** — a real week view with a 24-hour time grid (overlap-aware side-by-side events, all-day row, today highlight, now-line) and a month view; deterministic conflict detection flags overlapping timed tasks and computes a suggested reschedule — never applied automatically.
+
+## AI that actually works for you
+
+All AI runs on-device via Ollama (`qwen2.5:3b` on `127.0.0.1:11434`); deterministic code retrieves, validates and post-processes everything the model touches.
+
+- **Plan my day** (`POST /briefing`) — the Overview card asks local AI for a 2-sentence summary, ordered priorities and suggested time blocks. Blocks are validated in code against free slots computed from your saved timed tasks (invalid ids, out-of-slot starts and overlaps are dropped, snapped or trimmed — never trusted), and can be added to the calendar with one click. Nothing changes without your confirmation; if Ollama is down you get a deterministic basic plan.
+- **AI Capture** — extraction with auto-detected space (`space_name`/keyword fallback), plus the deterministic guards above (dates, times, people, amounts, titles).
+- **Assistant** — answers grounded only in saved SQLite records ("From your saved records:" vs "Suggestions:"), explains conflicts with computed suggestions and drafts reschedule messages; it never mutates anything.
+- **Lock In focus plans** — space-aware checklists generated for the task at hand, with a built-in fallback.
 
 ## Requirements
 
@@ -58,7 +73,7 @@ npm run dev
 
 Open http://localhost:5173. Everything binds to `127.0.0.1`/`localhost` only, so your records are not exposed on your network.
 
-The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `businesses.category` default `'Business'`). Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
+The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `tasks.end_date`, `businesses.category` default `'Business'`). Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
 
 ```bash
 cp soloops/backend/soloops.db soloops/backend/backups/soloops-$(date +%Y%m%d-%H%M%S).db
@@ -119,9 +134,11 @@ The seeder refuses to touch the real `soloops.db` (unless `--allow-main-db`) and
 >
 > **(0:40)** "Today's Attention ranks everything across every space with plain code: overdue, today, next three days." *(Dashboard)*
 >
-> **(0:50)** "Ask SoloOps: what should I prioritize today?" *(ask)* "The answer separates what's actually saved from AI suggestions — it only knows what I chose to save, and nothing leaves my machine."
+> **(0:45)** "'Plan my day' — local AI reads my saved tasks and free time and proposes time blocks; I add one to the calendar with a click." *(Plan my day → Add to calendar)*
 >
-> **(1:05)** "Time to work: Lock In on the scholarship task. Local AI builds a checklist from the task and my space, and the 25-minute timer starts." *(Generate Plan, Start, tick a step, Mark Complete)*
+> **(0:55)** "Ask SoloOps: what should I prioritize today?" *(ask)* "The answer separates what's actually saved from AI suggestions — it only knows what I chose to save, and nothing leaves my machine."
+>
+> **(1:10)** "Time to work: Lock In on the scholarship task. Local AI builds a checklist from the task and my space, and the Pomodoro timer starts — it floats over every page and can pop out to its own always-on-top window." *(Generate Plan, Start, tick a step, Mark Complete)*
 >
 > **(1:20)** "One person. Multiple roles. One private AI assistant. That's SoloOps AI."
 
@@ -130,7 +147,7 @@ The seeder refuses to touch the real `soloops.db` (unless `--allow-main-db`) and
 ```text
 soloops/
 ├── backend/
-│   ├── main.py            # FastAPI app: spaces, extraction, tasks, /attention, /calendar, /lock-in/plan, /chat
+│   ├── main.py            # FastAPI app: spaces, extraction, tasks, /attention, /calendar, /briefing, /lock-in/plan, /chat
 │   ├── attention.py       # deterministic priority + conflict logic (Asia/Manila dates)
 │   ├── database.py        # SQLite access + additive migrations
 │   ├── seed_demo.py       # demo seeder for a separate DB
@@ -156,7 +173,6 @@ soloops/
 
 - No authentication (single local user by design).
 - No specialized modules (no inventory, ledger, GPA tracking) — spaces are general-purpose contexts.
-- The calendar is a week-column view, not an hour grid; conflict detection needs tasks to have a start time (end times make ranges, but equal start times still count as overlaps).
+- Conflict detection needs tasks to have a start time (end times make ranges, but equal start times still count as overlaps); multi-day spans are excluded from conflict checks.
 - The assistant can explain conflicts and draft messages, but it never changes, moves or cancels anything — all edits are manual.
-- Pomodoro state is not persisted across page reloads.
 - AI output quality depends on the 3B model; deterministic guards catch the common failure modes, but always review extractions.

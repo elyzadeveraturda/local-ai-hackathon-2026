@@ -1,16 +1,11 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import { spaceColor, dueText } from "./spaces";
+import { formatClock } from "./useFocusTimer";
 
-const SESSION_SECONDS = 25 * 60;
+const PRESETS = [5, 15, 25, 50];
 
-function formatClock(seconds) {
-  const m = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const s = String(seconds % 60).padStart(2, "0");
-  return `${m}:${s}`;
-}
-
-export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
+export default function LockIn({ initialTaskId, spaces = [], onChanged, timer }) {
   const [tasks, setTasks] = useState([]);
   const [taskId, setTaskId] = useState(
     initialTaskId ? String(initialTaskId) : ""
@@ -18,10 +13,12 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
   const [plan, setPlan] = useState(null);
   const [checked, setChecked] = useState([]);
   const [planning, setPlanning] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(SESSION_SECONDS);
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [completedTask, setCompletedTask] = useState(null);
+  const [customMin, setCustomMin] = useState("");
+
+  const secondsLeft = timer.remainingSec;
+  const running = timer.running;
 
   useEffect(() => {
     apiFetch("/tasks?status=pending")
@@ -44,19 +41,13 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
       .catch((err) => setError(err.message));
   }, [initialTaskId]);
 
+  // link the shared timer to the focused task when idle
   useEffect(() => {
-    if (!running) return undefined;
-    const timer = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          setRunning(false);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [running]);
+    if (taskId && !timer.running) {
+      timer.setTaskId(Number(taskId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
 
   const task = tasks.find((t) => String(t.id) === taskId);
 
@@ -65,8 +56,13 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
     setPlan(null);
     setChecked([]);
     setCompletedTask(null);
-    setRunning(false);
-    setSecondsLeft(SESSION_SECONDS);
+    if (!timer.running) timer.reset();
+  }
+
+  function applyCustom() {
+    const m = Number(customMin);
+    if (m >= 1) timer.setDurationMin(m);
+    setCustomMin("");
   }
 
   async function generatePlan() {
@@ -93,7 +89,8 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
     try {
       await apiFetch(`/tasks/${task.id}/complete`, { method: "PATCH" });
       setCompletedTask(task);
-      setRunning(false);
+      timer.reset();
+      timer.setTaskId(null);
       setTasks(tasks.filter((t) => t.id !== task.id));
       setTaskId("");
       setPlan(null);
@@ -104,7 +101,7 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
   }
 
   const doneCount = checked.filter(Boolean).length;
-  const elapsed = 1 - secondsLeft / SESSION_SECONDS;
+  const elapsed = 1 - secondsLeft / timer.durationSec;
 
   return (
     <>
@@ -157,31 +154,63 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged }) {
             <div className="progress">
               <div style={{ width: `${elapsed * 100}%` }} />
             </div>
-            {secondsLeft === 0 && (
+            <div className="chip-row" style={{ justifyContent: "center", margin: "0 0 10px" }}>
+              {PRESETS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={
+                    timer.durationSec === m * 60
+                      ? "chip chip-active"
+                      : "chip"
+                  }
+                  disabled={running}
+                  onClick={() => timer.setDurationMin(m)}
+                >
+                  {m}m
+                </button>
+              ))}
+              <input
+                className="control float-custom"
+                type="number"
+                min="1"
+                max="180"
+                placeholder="min"
+                value={customMin}
+                disabled={running}
+                onChange={(e) => setCustomMin(e.target.value)}
+                onBlur={applyCustom}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyCustom();
+                }}
+              />
+            </div>
+            {timer.finished && (
               <p className="muted">Session complete! Take a 5-minute break.</p>
             )}
             <div className="timer-actions">
               <button
                 className="btn"
-                onClick={() => setRunning(!running)}
-                disabled={secondsLeft === 0}
+                onClick={running ? timer.pause : timer.start}
+                disabled={secondsLeft === 0 && !running}
               >
                 {running
                   ? "Pause"
-                  : secondsLeft < SESSION_SECONDS
+                  : secondsLeft < timer.durationSec
                   ? "Resume"
                   : "Start"}
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => {
-                  setRunning(false);
-                  setSecondsLeft(SESSION_SECONDS);
-                }}
+                onClick={timer.reset}
               >
                 Reset
               </button>
             </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              Pomodoro (5/15/25/50 min or custom) · shared with the
+              floating timer
+            </p>
           </div>
 
           <div className="card">

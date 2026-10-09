@@ -85,29 +85,33 @@ export default function AskSoloOps({
   }
 
   return (
-    <section className="extractor-page">
-      <h1>Assistant</h1>
-      <p>
-        Context-aware help grounded only in what you've saved. It never
-        changes your tasks or bookings.
-      </p>
+    <>
+      <div className="page-head">
+        <h1>Assistant</h1>
+        <p className="page-sub">
+          Context-aware help grounded only in what you've saved. It
+          never changes your tasks or bookings.
+        </p>
+      </div>
 
-      <div className="extractor-card">
+      <div className="card" style={{ marginBottom: 20 }}>
         <div className="scope-toggle">
-          <button
-            type="button"
-            className={scope === "all" ? "chip chip-active" : "chip"}
-            onClick={() => setScope("all")}
-          >
-            All Spaces
-          </button>
-          <button
-            type="button"
-            className={scope === "space" ? "chip chip-active" : "chip"}
-            onClick={() => setScope("space")}
-          >
-            Selected Space
-          </button>
+          <div className="seg">
+            <button
+              type="button"
+              className={scope === "all" ? "seg-active" : ""}
+              onClick={() => setScope("all")}
+            >
+              All spaces
+            </button>
+            <button
+              type="button"
+              className={scope === "space" ? "seg-active" : ""}
+              onClick={() => setScope("space")}
+            >
+              One space
+            </button>
+          </div>
           {scope === "space" && (
             <select
               value={spaceId}
@@ -138,45 +142,54 @@ export default function AskSoloOps({
           ))}
         </div>
 
-        <textarea
-          rows={4}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask about your tasks, deadlines, or responsibilities..."
-        />
+        <label className="field-label">
+          Message
+          <textarea
+            className="control"
+            rows={4}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about your tasks, deadlines, or responsibilities..."
+          />
+        </label>
 
         <button
+          className="btn"
+          style={{ marginTop: 12 }}
           onClick={() => ask()}
           disabled={
             loading || !message.trim() || (scope === "space" && !spaceId)
           }
         >
-          {loading ? "Thinking..." : "Ask Local AI →"}
+          {loading ? "Thinking..." : "Ask local AI"}
         </button>
 
         {error && <p className="extractor-error">{error}</p>}
       </div>
 
-      {exchanges.map((exchange, i) => (
-        <div className="extractor-card" key={i}>
-          <p>
-            <strong>You:</strong> {exchange.question}
-          </p>
-          <div className="ai-response">
-            <strong>SoloOps</strong>
-            <p style={{ whiteSpace: "pre-wrap" }}>
-              <RichText text={exchange.reply} />
-            </p>
-            {exchange.sources && (
-              <small className="muted">
-                Grounded in {exchange.sources.task_count} saved tasks
-                from: {exchange.sources.spaces.join(", ") || "none"}
-              </small>
-            )}
-          </div>
+      {exchanges.length > 0 && (
+        <div className="card">
+          {exchanges.map((exchange, i) => (
+            <div className="conv" key={i}>
+              <div className="bubble bubble-user">
+                {exchange.question}
+              </div>
+              <div className="bubble bubble-ai">
+                <RichText text={exchange.reply} />
+                {exchange.sources && (
+                  <small className="muted">
+                    Grounded in {exchange.sources.task_count} saved
+                    tasks from:{" "}
+                    {exchange.sources.spaces.join(", ") || "none"}
+                  </small>
+                )}
+              </div>
+            </div>
+          ))}
+          {loading && <p className="muted">Thinking...</p>}
         </div>
-      ))}
-    </section>
+      )}
+    </>
   );
 }

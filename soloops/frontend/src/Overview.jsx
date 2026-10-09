@@ -9,6 +9,7 @@ import {
 } from "./spaces";
 import Attention from "./Attention";
 import QuickAddTask from "./QuickAddTask";
+import PlanMyDay from "./PlanMyDay";
 import RichText from "./RichText";
 
 const ASK_CHIPS = [
@@ -37,7 +38,11 @@ export default function Overview({
   onChanged,
   onLockIn,
 }) {
-  const [quickAdd, setQuickAdd] = useState(false);
+  const [quickAdd, setQuickAdd] = useState(
+    () =>
+      new URLSearchParams(window.location.search).get("quickadd") ===
+      "1"
+  );
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState(null);
   const [sources, setSources] = useState(null);
@@ -169,6 +174,13 @@ export default function Overview({
           </button>
         )}
       </div>
+
+      <PlanMyDay
+        key={today || "none"}
+        attention={attention}
+        spaces={spaces}
+        onChanged={onChanged}
+      />
 
       {conflicts.length > 0 && (
         <div className="conflict-banner">

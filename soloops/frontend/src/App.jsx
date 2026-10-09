@@ -10,6 +10,8 @@ import SpacePage from "./SpacePage";
 import CalendarPage from "./CalendarPage";
 import { apiFetch } from "./api";
 import { spaceColor } from "./spaces";
+import { useFocusTimer } from "./useFocusTimer";
+import FloatingTimer from "./FloatingTimer";
 
 const PAGE_NAMES = {
   overview: "Overview",
@@ -42,6 +44,7 @@ function App() {
   const [spaces, setSpaces] = useState([]);
   const [attention, setAttention] = useState(null);
   const [aiOnline, setAiOnline] = useState(false);
+  const timer = useFocusTimer();
 
   const refresh = useCallback(() => {
     apiFetch("/businesses").then(setSpaces).catch(() => {});
@@ -169,6 +172,7 @@ function App() {
             initialTaskId={lockInTaskId}
             spaces={spaces}
             onChanged={refresh}
+            timer={timer}
           />
         </div>
       </div>
@@ -251,6 +255,11 @@ function App() {
           <Businesses onCountChange={() => refresh()} />
         )}
       </main>
+      <FloatingTimer
+        timer={timer}
+        tasks={attention?.tasks || []}
+        onOpenFocus={() => openLockIn(timer.taskId)}
+      />
     </div>
   );
 }
