@@ -95,6 +95,8 @@ def suggest_slot(a, b, tasks):
     for t in tasks:
         if t.get("status") == "completed" or t["id"] == move["task"]["id"]:
             continue
+        if t.get("end_date"):
+            continue
         if t.get("due_date") != day or not t.get("due_time"):
             continue
         s = _minutes(t.get("due_time"))
@@ -129,7 +131,7 @@ def find_conflicts(tasks, from_date=None):
             continue
         due = task.get("due_date")
         start = _minutes(task.get("due_time"))
-        if not due or start is None:
+        if task.get("end_date") or not due or start is None:
             continue
         if from_date and due < from_date.isoformat():
             continue
@@ -161,6 +163,51 @@ def find_conflicts(tasks, from_date=None):
 
     conflicts.sort(key=lambda c: (c["date"], c["time"]))
     return conflicts
+
+
+def free_slots(tasks, day, start="08:00", end="22:00",
+               now=None, min_minutes=30):
+    """Unbooked gaps on `day` (YYYY-MM-DD) between start and end.
+    `now` is a datetime; when it falls on `day`, the window starts
+    at `now` rounded up to the next :00/:30."""
+    window_start = _minutes(start) or 0
+    window_end = _minutes(end) or 24 * 60
+    if now is not None and now.date().isoformat() == day:
+        minute = now.hour * 60 + now.minute
+        if now.second or now.microsecond:
+            minute += 1
+        window_start = max(window_start, ((minute + 29) // 30) * 30)
+
+    busy = []
+    for task in tasks:
+        if task.get("status") == "completed":
+            continue
+        if task.get("end_date") or task.get("due_date") != day:
+            continue
+        s = _minutes(task.get("due_time"))
+        if s is None:
+            continue
+        e = _minutes(task.get("end_time"))
+        if e is None or e <= s:
+            e = s + 30
+        busy.append((max(s, window_start), min(e, window_end)))
+
+    busy = sorted(iv for iv in busy if iv[1] > iv[0])
+    slots = []
+    cursor = window_start
+    for s, e in busy:
+        if s - cursor >= min_minutes:
+            slots.append({
+                "start": f"{cursor // 60:02d}:{cursor % 60:02d}",
+                "end": f"{s // 60:02d}:{s % 60:02d}",
+            })
+        cursor = max(cursor, e)
+    if window_end - cursor >= min_minutes:
+        slots.append({
+            "start": f"{cursor // 60:02d}:{cursor % 60:02d}",
+            "end": f"{window_end // 60:02d}:{window_end % 60:02d}",
+        })
+    return slots
 
 
 def build_attention(tasks, today=None):

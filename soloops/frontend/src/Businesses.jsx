@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
-import { categoryBadgeStyle } from "./spaces";
+import { categoryBadgeStyle, spaceColor } from "./spaces";
 
 const SPACE_CATEGORIES = [
   "Academic",
@@ -159,105 +159,145 @@ export default function Businesses({ onCountChange }) {
   }
 
   return (
-    <section className="business-page">
-      <h2>My Spaces</h2>
-      <p>
-        Organize every part of your life — school, business, content,
-        personal.
-      </p>
-
-      <div className="chip-row">
-        {TEMPLATES.map((template) => (
-          <button
-            type="button"
-            className="chip"
-            key={template.label}
-            onClick={() => applyTemplate(template)}
-          >
-            {template.label}
-          </button>
-        ))}
+    <>
+      <div className="page-head">
+        <h1>Manage spaces</h1>
+        <p className="page-sub">
+          Each space is one part of your life. SoloOps uses its
+          description to personalize AI help.
+        </p>
       </div>
 
-      <form className="business-form" onSubmit={save}>
-        <h3>{editingId ? "Edit Space" : "New Space"}</h3>
-
-        <input
-          placeholder="Space Name"
-          maxLength={100}
-          value={form.name}
-          onChange={(e) =>
-            setForm({ ...form, name: e.target.value })
-          }
-          required
-        />
-
-        <select
-          value={form.category}
-          onChange={(e) =>
-            setForm({ ...form, category: e.target.value })
-          }
-        >
-          {SPACE_CATEGORIES.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-head">
+          <h3>Quick start</h3>
+        </div>
+        <div className="chip-row" style={{ margin: 0 }}>
+          {TEMPLATES.map((template) => (
+            <button
+              type="button"
+              className="chip"
+              key={template.label}
+              onClick={() => applyTemplate(template)}
+            >
+              {template.label}
+            </button>
           ))}
-        </select>
+        </div>
+      </div>
 
-        <input
-          placeholder="Space Type (e.g. Scholarship, Camera Rental, TikTok)"
-          maxLength={100}
-          value={form.business_type}
-          onChange={(e) =>
-            setForm({ ...form, business_type: e.target.value })
-          }
-          required
-        />
+      <form className="card" onSubmit={save} style={{ marginBottom: 20 }}>
+        <h3 className="card-title">
+          {editingId ? "Edit space" : "New space"}
+        </h3>
 
-        <textarea
-          placeholder="Describe this part of your life (goals, responsibilities)..."
-          maxLength={1000}
-          value={form.description}
-          onChange={(e) =>
-            setForm({ ...form, description: e.target.value })
-          }
-          rows={3}
-        />
+        <div className="task-form">
+          <label>
+            Name *
+            <input
+              maxLength={100}
+              value={form.name}
+              onChange={(e) =>
+                setForm({ ...form, name: e.target.value })
+              }
+              required
+            />
+          </label>
+          <label>
+            Category
+            <select
+              value={form.category}
+              onChange={(e) =>
+                setForm({ ...form, category: e.target.value })
+              }
+            >
+              {SPACE_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="span-2">
+            Type (e.g. Scholarship, Camera Rental, TikTok) *
+            <input
+              maxLength={100}
+              value={form.business_type}
+              onChange={(e) =>
+                setForm({ ...form, business_type: e.target.value })
+              }
+              required
+            />
+          </label>
+          <label className="span-2">
+            Description
+            <textarea
+              placeholder="Describe this part of your life (goals, responsibilities)..."
+              maxLength={1000}
+              value={form.description}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
+              rows={3}
+            />
+          </label>
+        </div>
 
-        <div className="business-actions">
-          <button type="submit" disabled={busy}>
-            {editingId ? "Save Changes" : "+ Create Space"}
-          </button>
+        {error && <p role="alert" className="form-error">{error}</p>}
 
+        <div className="form-footer">
           {editingId && (
-            <button type="button" onClick={cancel}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={cancel}
+            >
               Cancel
             </button>
           )}
+          <button type="submit" className="btn" disabled={busy}>
+            {editingId ? "Save changes" : "+ Create space"}
+          </button>
         </div>
       </form>
 
-      {error && <p role="alert" className="form-error">{error}</p>}
-
       <div className="business-grid">
         {businesses.map((business) => (
-          <article className="business-card" key={business.id}>
-            <h3>{business.name}</h3>
-            <span
-              className="category-badge"
-              style={categoryBadgeStyle(business.category)}
-            >
-              {business.category || "Business"}
-            </span>{" "}
-            <span>{business.business_type}</span>
-            <p>{business.description || "No description yet."}</p>
+          <article
+            className="space-card"
+            key={business.id}
+            style={{ "--space-color": spaceColor(business.id, businesses), cursor: "default" }}
+          >
+            <div className="space-card-head">
+              <span className="space-card-name" style={{ margin: 0 }}>
+                {business.name}
+              </span>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <span
+                className="category-badge"
+                style={categoryBadgeStyle(business.category)}
+              >
+                {business.category || "Business"}
+              </span>{" "}
+              <span className="muted" style={{ fontSize: 12.5 }}>
+                {business.business_type}
+              </span>
+            </div>
+            <p className="muted" style={{ fontSize: 13, minHeight: 34 }}>
+              {business.description || "No description yet."}
+            </p>
 
             <div className="business-actions">
-              <button onClick={() => edit(business)} disabled={busy}>
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={() => edit(business)}
+                disabled={busy}
+              >
                 Edit
               </button>
               <button
+                className="btn btn-secondary btn-small"
                 onClick={() => remove(business.id)}
                 disabled={busy}
               >
@@ -269,8 +309,8 @@ export default function Businesses({ onCountChange }) {
       </div>
 
       {businesses.length === 0 && !error && (
-        <p>No spaces yet. Create your first space!</p>
+        <p className="muted">No spaces yet. Create your first space!</p>
       )}
-    </section>
+    </>
   );
 }

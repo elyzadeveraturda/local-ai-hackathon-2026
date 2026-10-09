@@ -3,7 +3,7 @@ import { apiFetch } from "./api";
 import { spaceColor, formatRange, formatTime12, shortDate } from "./spaces";
 import QuickAddTask from "./QuickAddTask";
 
-const HOUR_PX = 60;
+const HOUR_PX = 32; // full 24h ≈ 770px
 const PAD_TOP = 8;
 
 // pure string/UTC date math — never local-time toISOString
@@ -160,24 +160,9 @@ export default function CalendarPage({
     [cal]
   );
 
-  // visible hour range for the week grid
-  const { startHour, endHour } = useMemo(() => {
-    if (!cal) return { startHour: 7, endHour: 22 };
-    let lo = 7;
-    let hi = 22;
-    for (const day of cal.days) {
-      for (const t of day.tasks) {
-        if (!t.due_time) continue;
-        const s = Math.floor(toMin(t.due_time) / 60);
-        const e = t.end_time
-          ? Math.ceil(toMin(t.end_time) / 60)
-          : Math.floor(toMin(t.due_time) / 60) + 1;
-        lo = Math.min(lo, s);
-        hi = Math.max(hi, e);
-      }
-    }
-    return { startHour: Math.max(0, lo), endHour: Math.min(24, hi) };
-  }, [cal]);
+  // the week grid always renders the full day 12 AM–12 AM
+  const startHour = 0;
+  const endHour = 24;
 
   useEffect(() => {
     // on fresh data, scroll so ~1h before the earliest event (or 8 AM) is top
@@ -363,29 +348,55 @@ export default function CalendarPage({
           {cal.days.slice(0, 7).map((day) => (
             <div key={day.date} className="cal-allday-cell">
               {day.tasks
-                .filter((t) => !t.due_time)
-                .map((t) => (
-                  <button
-                    key={t.id}
-                    className="cal-chip"
-                    title={t.title}
-                    onClick={() => onLockIn?.(t.id)}
-                  >
-                    <span
-                      className="nav-dot"
-                      style={{
-                        background: spaceColor(t.business_id, spaces),
-                      }}
-                    />
-                    <span className="cal-chip-text">{t.title}</span>
-                  </button>
-                ))}
+                .filter((t) => !t.due_time || t.span)
+                .map((t) => {
+                  let chipLabel = t.title;
+                  if (t.span) {
+                    const endDay = t.end_date
+                      ? new Date(
+                          `${t.end_date}T00:00:00`
+                        ).toLocaleDateString("en-US", {
+                          weekday: "short",
+                        })
+                      : "";
+                    const range = `${formatTime12(t.due_time)} → ${endDay}${
+                      t.end_time ? ` ${formatTime12(t.end_time)}` : ""
+                    }`.trim();
+                    chipLabel = t.due_time
+                      ? `${range} · ${t.title}`
+                      : `${t.title} → ${endDay}`;
+                  }
+                  return (
+                    <button
+                      key={`${t.id}-${day.date}`}
+                      className={
+                        "cal-chip" + (t.span ? " span" : "") +
+                        (t.span_start ? " span-start" : "") +
+                        (t.span_end ? " span-end" : "")
+                      }
+                      title={`${t.title} · ${t.business_name}`}
+                      onClick={() => onLockIn?.(t.id)}
+                    >
+                      <span
+                        className="nav-dot"
+                        style={{
+                          background: spaceColor(t.business_id, spaces),
+                        }}
+                      />
+                      <span className="cal-chip-text">{chipLabel}</span>
+                    </button>
+                  );
+                })}
             </div>
           ))}
         </div>
-        <div className="cal-week-body" ref={bodyRef}>
+        <div
+          className="cal-week-body"
+          ref={bodyRef}
+          style={{ maxHeight: "max(480px, calc(100vh - 280px))" }}
+        >
           <div className="cal-gutter cal-gutter-hours">
-            {hours.map((h) => (
+            {hours.slice(0, -1).map((h) => (
               <div
                 key={h}
                 className="cal-hour-label"
@@ -397,7 +408,7 @@ export default function CalendarPage({
           </div>
           {cal.days.slice(0, 7).map((day) => {
             const timed = day.tasks
-              .filter((t) => t.due_time)
+              .filter((t) => t.due_time && !t.span)
               .map((t) => ({
                 t,
                 s: toMin(t.due_time),
@@ -422,21 +433,25 @@ export default function CalendarPage({
                     style={{ top: PAD_TOP + (h - startHour) * HOUR_PX }}
                   />
                 ))}
-                {hours.slice(0, -1).map((h) => (
-                  <div
-                    key={`${h}-h`}
-                    className="cal-half-line"
-                    style={{
-                      top: PAD_TOP + (h - startHour) * HOUR_PX + HOUR_PX / 2,
-                    }}
-                  />
-                ))}
                 {timed.map(({ t, s, e }) => {
                   const color = spaceColor(t.business_id, spaces);
                   const { col, cols } = layout.get(t.id);
                   const w = 100 / cols;
-                  const hPx = Math.max(e - s, 30) * (HOUR_PX / 60) - 2;
-                  const compact = hPx < 44 || (1 / cols < 0.5 && hPx < 60);
+                  const gridBottom =
+                    PAD_TOP + (endHour - startHour) * HOUR_PX;
+                  const top = Math.max(
+                    0,
+                    PAD_TOP + (s / 60 - startHour) * HOUR_PX
+                  );
+                  const hPx = Math.min(
+                    Math.max(
+                      Math.max(e - s, 30) * (HOUR_PX / 60) - 2,
+                      18
+                    ),
+                    gridBottom - top
+                  );
+                  const compact =
+                    hPx < 56 || (1 / cols < 0.5 && hPx < 60);
                   const narrow = cols > 1;
                   return (
                     <button
@@ -451,10 +466,7 @@ export default function CalendarPage({
                       title={`${formatRange(t)} · ${t.title} · ${t.business_name}`}
                       onClick={() => onLockIn?.(t.id)}
                       style={{
-                        top: Math.max(
-                          0,
-                          PAD_TOP + (s / 60 - startHour) * HOUR_PX
-                        ),
+                        top,
                         height: hPx,
                         left: `calc(${col * w}% + 2px)`,
                         width: `calc(${w}% - 4px)`,

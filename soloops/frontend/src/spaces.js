@@ -54,6 +54,9 @@ export function formatRange(task) {
 
 export function dueText(task) {
   if (!task.due_date) return "No due date";
+  if (task.end_date) {
+    return `${shortDate(task.due_date)} → ${shortDate(task.end_date)}`;
+  }
   const time = task.due_time ? `, ${formatTime12(task.due_time)}` : "";
   const end = task.end_time ? `–${formatTime12(task.end_time)}` : "";
   const days = task.days_until_due;
@@ -69,6 +72,50 @@ export function dueText(task) {
     day: "numeric",
   });
   return `${label}${time}${end}`;
+}
+
+export function toTaskFields(value) {
+  const s = value.start || "";
+  const e = value.end || "";
+  const sDate = s.slice(0, 10) || null;
+  const eDate = e.slice(0, 10) || null;
+  const fields = {
+    due_date: sDate,
+    due_time: null,
+    end_date: null,
+    end_time: null,
+  };
+  if (!sDate) return fields;
+  if (value.allDay) {
+    if (eDate && eDate > sDate) fields.end_date = eDate;
+  } else {
+    fields.due_time = s.slice(11, 16) || null;
+    if (eDate === sDate) {
+      fields.end_time = e.slice(11, 16) || null;
+    } else if (eDate) {
+      fields.end_date = eDate;
+      fields.end_time = e.slice(11, 16) || null;
+    }
+  }
+  return fields;
+}
+
+export function fromTaskFields(task) {
+  const allDay = !task.due_time;
+  let start = "";
+  if (task.due_date) {
+    start = allDay ? task.due_date : `${task.due_date}T${task.due_time}`;
+  }
+  let end = "";
+  if (task.end_date) {
+    end =
+      allDay || !task.end_time
+        ? task.end_date
+        : `${task.end_date}T${task.end_time}`;
+  } else if (task.end_time && task.due_date && !allDay) {
+    end = `${task.due_date}T${task.end_time}`;
+  }
+  return { allDay, start, end };
 }
 
 export function shortDate(iso) {

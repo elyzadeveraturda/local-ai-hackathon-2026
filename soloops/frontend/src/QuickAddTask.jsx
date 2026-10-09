@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { apiFetch } from "./api";
+import DateRangeFields from "./DateRangeFields";
+import { toTaskFields } from "./spaces";
 
 export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel }) {
   const [form, setForm] = useState({
     business_id: initialSpaceId ? String(initialSpaceId) : "",
     title: "",
-    due_date: "",
-    due_time: "",
-    end_time: "",
     notes: "",
+  });
+  const [range, setRange] = useState({
+    allDay: false,
+    start: "",
+    end: "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -20,6 +24,10 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
   async function save(e) {
     e.preventDefault();
     if (busy || !form.title.trim() || !form.business_id) return;
+    if (range.start && range.end && range.end < range.start) {
+      setError("End must be after start.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -28,9 +36,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
         body: JSON.stringify({
           business_id: Number(form.business_id),
           title: form.title.trim(),
-          due_date: form.due_date || null,
-          due_time: form.due_time || null,
-          end_time: form.end_time || null,
+          ...toTaskFields(range),
           notes: form.notes.trim(),
         }),
       });
@@ -43,9 +49,9 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
   }
 
   return (
-    <form className="card" onSubmit={save} style={{ marginBottom: 22 }}>
+    <form className="card task-form-card" onSubmit={save} style={{ marginBottom: 22 }}>
       <h3 className="card-title">New task</h3>
-      <div className="task-form">
+      <div className="task-form task-form-qa">
         <label>
           Space *
           <select
@@ -70,33 +76,13 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
             required
           />
         </label>
-        <label>
-          Date
-          <input
-            type="date"
-            value={form.due_date}
-            onChange={(e) => update("due_date", e.target.value)}
-          />
-        </label>
-        <label>
-          Start time
-          <input
-            type="time"
-            value={form.due_time}
-            onChange={(e) => update("due_time", e.target.value)}
-          />
-        </label>
-        <label>
-          End time
-          <input
-            type="time"
-            value={form.end_time}
-            onChange={(e) => update("end_time", e.target.value)}
-          />
-        </label>
-        <label>
+        <div className="span-2">
+          <DateRangeFields value={range} onChange={setRange} />
+        </div>
+        <label className="span-2">
           Notes
-          <input
+          <textarea
+            rows={2}
             value={form.notes}
             maxLength={2000}
             onChange={(e) => update("notes", e.target.value)}
@@ -104,12 +90,12 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
         </label>
       </div>
       {error && <p className="extractor-error">{error}</p>}
-      <div className="business-actions">
-        <button type="submit" className="btn" disabled={busy || !form.title.trim() || !form.business_id}>
-          {busy ? "Saving..." : "Save task"}
-        </button>
+      <div className="form-footer">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
           Cancel
+        </button>
+        <button type="submit" className="btn" disabled={busy || !form.title.trim() || !form.business_id}>
+          {busy ? "Saving..." : "Save task"}
         </button>
       </div>
     </form>

@@ -67,6 +67,8 @@ def init_db():
             conn.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
         if "end_time" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN end_time TEXT")
+        if "end_date" not in task_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN end_date TEXT")
 
         conn.commit()
 
@@ -146,17 +148,17 @@ TASK_SELECT = """
 def create_task(
     business_id, title, customer=None, item=None,
     due_date=None, amount=None, notes="", due_time=None,
-    end_time=None
+    end_time=None, end_date=None
 ):
     with get_connection() as conn:
         cursor = conn.execute("""
             INSERT INTO tasks
             (business_id, title, customer, item,
-             due_date, due_time, end_time, amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             due_date, due_time, end_time, end_date, amount, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             business_id, title, customer, item,
-            due_date, due_time, end_time, amount, notes
+            due_date, due_time, end_time, end_date, amount, notes
         ))
         conn.commit()
         task_id = cursor.lastrowid
@@ -210,6 +212,23 @@ def list_tasks(status=None, business_id=None):
                 tasks.id DESC
         """, params).fetchall()
         return [dict(row) for row in rows]
+
+
+def update_task_schedule(
+    task_id, due_date, due_time, end_time, end_date
+):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE tasks
+            SET due_date = ?, due_time = ?,
+                end_time = ?, end_date = ?
+            WHERE id = ?
+            """,
+            (due_date, due_time, end_time, end_date, task_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def set_task_status(task_id, status):
