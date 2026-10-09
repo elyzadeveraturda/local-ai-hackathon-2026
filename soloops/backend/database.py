@@ -24,6 +24,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 business_type TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'Business',
                 description TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
                     DEFAULT CURRENT_TIMESTAMP
@@ -47,6 +48,16 @@ def init_db():
                     ON DELETE CASCADE
             )
         """)
+
+        business_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(businesses)")
+        }
+        if "category" not in business_columns:
+            conn.execute(
+                "ALTER TABLE businesses "
+                "ADD COLUMN category TEXT NOT NULL DEFAULT 'Business'"
+            )
 
         task_columns = {
             row["name"]
@@ -75,15 +86,15 @@ def get_business(business_id):
         return dict(row) if row else None
 
 
-def create_business(name, business_type, description):
+def create_business(name, business_type, description, category="Business"):
     with get_connection() as conn:
         cursor = conn.execute(
             """
             INSERT INTO businesses
-                (name, business_type, description)
-            VALUES (?, ?, ?)
+                (name, business_type, description, category)
+            VALUES (?, ?, ?, ?)
             """,
-            (name, business_type, description)
+            (name, business_type, description, category)
         )
         business_id = cursor.lastrowid
         conn.commit()
@@ -92,16 +103,16 @@ def create_business(name, business_type, description):
 
 
 def update_business(
-    business_id, name, business_type, description
+    business_id, name, business_type, description, category="Business"
 ):
     with get_connection() as conn:
         cursor = conn.execute(
             """
             UPDATE businesses
-            SET name = ?, business_type = ?, description = ?
+            SET name = ?, business_type = ?, description = ?, category = ?
             WHERE id = ?
             """,
-            (name, business_type, description, business_id)
+            (name, business_type, description, category, business_id)
         )
         conn.commit()
         updated = cursor.rowcount > 0
@@ -123,6 +134,7 @@ TASK_SELECT = """
     SELECT tasks.*,
            businesses.name AS business_name,
            businesses.business_type AS business_type,
+           businesses.category AS space_category,
            businesses.description AS business_description
     FROM tasks
     JOIN businesses ON businesses.id = tasks.business_id
