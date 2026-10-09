@@ -1,6 +1,8 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
+import DateRangeFields from "./DateRangeFields";
+import { toTaskFields, fromTaskFields } from "./spaces";
 
 const EXAMPLES = [
   "Reminder: Scholarship renewal documents must be submitted on October 15.",
@@ -12,6 +14,8 @@ const EXAMPLES = [
 const HIDDEN_KEYS = new Set([
   "business_id",
   "space_id",
+  "space_auto",
+  "space_reason",
   "requires_confirmation",
 ]);
 
@@ -31,16 +35,18 @@ function draftFromResult(result) {
     title: result.title || "Follow up",
     person: result.person || "",
     subject: result.subject || "",
-    due_date: result.due_date || "",
-    due_time: result.due_time || "",
+    range: fromTaskFields(result),
+    spaceId: result.business_id,
     amount: result.amount ?? "",
     notes: result.notes || "",
   };
 }
 
-export default function MessageExtractor() {
+export default function MessageExtractor({ initialSpaceId, onChanged }) {
   const [businesses, setBusinesses] = useState([]);
-  const [businessId, setBusinessId] = useState("");
+  const [businessId, setBusinessId] = useState(
+    initialSpaceId ? String(initialSpaceId) : ""
+  );
   const [message, setMessage] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -56,8 +62,12 @@ export default function MessageExtractor() {
         const data = await apiFetch("/businesses");
         setBusinesses(data);
 
-        if (data.length > 0) {
-          setBusinessId(String(data[0].id));
+        if (!initialSpaceId) {
+          if (data.length >= 2) {
+            setBusinessId("auto");
+          } else if (data.length === 1) {
+            setBusinessId(String(data[0].id));
+          }
         }
       } catch (err) {
         setError(err.message);
@@ -65,7 +75,7 @@ export default function MessageExtractor() {
     }
 
     loadBusinesses();
-  }, []);
+  }, [initialSpaceId]);
 
   async function extractMessage() {
     if (!businessId || !message.trim()) return;
@@ -78,12 +88,13 @@ export default function MessageExtractor() {
     setSavedTask(null);
 
     try {
+      const body = { message: message.trim() };
+      if (businessId !== "auto") {
+        body.business_id = Number(businessId);
+      }
       const data = await apiFetch("/extract/message", {
         method: "POST",
-        body: JSON.stringify({
-          business_id: Number(businessId),
-          message: message.trim(),
-        }),
+        body: JSON.stringify(body),
       });
 
       setResult(data);
@@ -111,6 +122,15 @@ export default function MessageExtractor() {
     setSaving(true);
     setSaveError("");
 
+    if (
+      draft.range.start &&
+      draft.range.end &&
+      draft.range.end < draft.range.start
+    ) {
+      setSaveError("End must be after start.");
+      return;
+    }
+
     const notes = [
       draft.notes.trim(),
       `Original text: ${message.trim()}`,
@@ -122,17 +142,17 @@ export default function MessageExtractor() {
       const task = await apiFetch("/tasks", {
         method: "POST",
         body: JSON.stringify({
-          business_id: result.business_id,
+          business_id: draft.spaceId || result.business_id,
           title,
           customer: draft.person.trim() || null,
           item: draft.subject.trim() || null,
-          due_date: draft.due_date || null,
-          due_time: draft.due_time || null,
+          ...toTaskFields(draft.range),
           amount: draft.amount === "" ? null : Number(draft.amount),
           notes,
         }),
       });
       setSavedTask(task);
+      onChanged?.();
     } catch (err) {
       setSaveError(err.message);
     } finally {
@@ -153,18 +173,26 @@ export default function MessageExtractor() {
   }
 
   return (
-    <section className="extractor-page">
-      <h1>AI Capture</h1>
-      <p>
-        Paste any text or message — school notices, bookings, content
-        to-dos, personal reminders. Your local AI turns it into a task
-        you review before saving.
-      </p>
+    <>
+      <div className="page-head">
+        <h1>AI Capture</h1>
+        <p className="page-sub">
+          Paste any text or message — school notices, bookings,
+          content to-dos, personal reminders. Your local AI turns it
+          into a task you review before saving.
+        </p>
+      </div>
 
-      <div className="extractor-card">
-        <label htmlFor="business-select">Select Space</label>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-head">
+          <h3>Paste text or message</h3>
+        </div>
+        <label className="field-label" htmlFor="business-select">
+          Space
+        </label>
         <select
           id="business-select"
+          className="control"
           value={businessId}
           onChange={(e) => {
             setBusinessId(e.target.value);
@@ -176,6 +204,9 @@ export default function MessageExtractor() {
           {businesses.length === 0 && (
             <option value="">Create a space first</option>
           )}
+          {businesses.length >= 2 && (
+            <option value="auto">✦ Auto-detect space (AI)</option>
+          )}
           {businesses.map((business) => (
             <option key={business.id} value={business.id}>
               {business.name} ({business.category || "Business"})
@@ -183,9 +214,16 @@ export default function MessageExtractor() {
           ))}
         </select>
 
-        <label htmlFor="customer-message">Paste Text or Message</label>
+        <label
+          className="field-label"
+          htmlFor="customer-message"
+          style={{ marginTop: 14 }}
+        >
+          Text or message
+        </label>
         <textarea
           id="customer-message"
+          className="control"
           rows={6}
           value={message}
           onChange={(e) => {
@@ -218,6 +256,7 @@ export default function MessageExtractor() {
         </div>
 
         <button
+          className="btn"
           onClick={extractMessage}
           disabled={loading || !businessId || !message.trim()}
         >
@@ -230,8 +269,41 @@ export default function MessageExtractor() {
       </div>
 
       {result && draft && (
-        <div className="extractor-card">
-          <h2>Extracted Information</h2>
+        <div className="card">
+          <h3 className="card-title">Extracted information</h3>
+
+          {result.space_auto && (
+            <div className="auto-space-note">
+              <span>
+                {result.space_source === "keyword"
+                  ? "Matched by keywords: "
+                  : "✦ AI suggested space: "}
+                {" "}
+                <strong>
+                  {
+                    businesses.find((b) => b.id === result.business_id)
+                      ?.name
+                  }
+                </strong>
+                {result.space_reason
+                  ? ` — ${result.space_reason}`
+                  : ""}
+              </span>
+              <select
+                value={draft.spaceId}
+                disabled={!!savedTask}
+                onChange={(e) =>
+                  updateDraft("spaceId", Number(e.target.value))
+                }
+              >
+                {businesses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="extracted-fields">
             {Object.entries(result)
@@ -252,7 +324,7 @@ export default function MessageExtractor() {
             ))}
           </div>
 
-          <h2>Review &amp; Save as Task</h2>
+          <h3 className="card-title">Review &amp; save</h3>
           <p className="confirmation-note">
             AI extraction may contain mistakes. Correct anything below
             before saving.
@@ -286,24 +358,13 @@ export default function MessageExtractor() {
                 onChange={(e) => updateDraft("subject", e.target.value)}
               />
             </label>
-            <label>
-              Due date
-              <input
-                type="date"
-                value={draft.due_date}
+            <div className="span-2">
+              <DateRangeFields
+                value={draft.range}
                 disabled={!!savedTask}
-                onChange={(e) => updateDraft("due_date", e.target.value)}
+                onChange={(v) => updateDraft("range", v)}
               />
-            </label>
-            <label>
-              Time
-              <input
-                type="time"
-                value={draft.due_time}
-                disabled={!!savedTask}
-                onChange={(e) => updateDraft("due_time", e.target.value)}
-              />
-            </label>
+            </div>
             <label>
               Amount
               <input
@@ -341,16 +402,19 @@ export default function MessageExtractor() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={saveAsTask}
-              disabled={saving || !draft.title.trim()}
-            >
-              {saving ? "Saving..." : "Save as Task"}
-            </button>
+            <div className="form-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={saveAsTask}
+                disabled={saving || !draft.title.trim()}
+              >
+                {saving ? "Saving..." : "Save as Task"}
+              </button>
+            </div>
           )}
         </div>
       )}
-    </section>
+    </>
   );
 }

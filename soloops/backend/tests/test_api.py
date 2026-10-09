@@ -2,7 +2,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -253,10 +253,11 @@ def test_extraction_guards(client):
     msg = "Maria wants to rent the camera on Saturday at 3 PM for 200"
     ai2 = dict(ai, person="Maria", due_date="2026-10-10",
                due_time="15:00", amount=200)
-    with patch.object(main.requests, "post", return_value=FakeResponse(ai2)):
-        data = client.post("/extract/message", json={
-            "business_id": bid, "message": msg
-        }).json()
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(main.requests, "post", return_value=FakeResponse(ai2)):
+            data = client.post("/extract/message", json={
+                "business_id": bid, "message": msg
+            }).json()
     assert data["due_date"] == "2026-10-10"
     assert data["due_time"] == "15:00"
     assert data["amount"] == 200
@@ -460,3 +461,561 @@ def test_extraction_corrects_wrong_weekday_date(client):
             }).json()
     assert data["due_date"] == "2026-10-13"
     assert data["title"] == "Schedule my dental appointment"
+
+
+def _timed_task(id_, date_, start, end=None, status="pending", **kw):
+    t = {
+        "id": id_, "title": f"t{id_}", "due_date": date_,
+        "due_time": start, "end_time": end, "status": status,
+        "business_name": "S", "space_category": "Business",
+    }
+    t.update(kw)
+    return t
+
+
+def test_find_conflicts():
+    from attention import find_conflicts
+    d = "2026-10-10"
+    # overlapping ranges
+    c = find_conflicts([
+        _timed_task(1, d, "16:00", "17:30"),
+        _timed_task(2, d, "16:00", "16:30"),
+    ])
+    assert len(c) == 1
+    assert c[0]["date"] == d and c[0]["time"] == "16:00"
+    assert {t["title"] for t in c[0]["tasks"]} == {"t1", "t2"}
+    # identical start points
+    assert find_conflicts([
+        _timed_task(1, d, "09:00"), _timed_task(2, d, "09:00"),
+    ])
+    # point inside range
+    assert find_conflicts([
+        _timed_task(1, d, "14:00", "15:00"),
+        _timed_task(2, d, "14:30"),
+    ])
+    # adjacent is NOT a conflict
+    assert not find_conflicts([
+        _timed_task(1, d, "14:00", "15:00"),
+        _timed_task(2, d, "15:00", "16:00"),
+    ])
+    # different dates / completed / untimed excluded
+    assert not find_conflicts([
+        _timed_task(1, d, "14:00", "15:00"),
+        _timed_task(2, "2026-10-11", "14:00", "15:00"),
+        _timed_task(3, d, "14:00", "15:00", status="completed"),
+        _timed_task(4, d, None),
+    ])
+    # from_date filter
+    assert not find_conflicts(
+        [_timed_task(1, "2026-10-01", "14:00"),
+         _timed_task(2, "2026-10-01", "14:00")],
+        from_date=date(2026, 10, 9),
+    )
+
+
+def test_end_time_validation(client):
+    bid = make_business(client)
+    assert client.post("/tasks", json={
+        "business_id": bid, "title": "x", "end_time": "10:00",
+    }).status_code == 400
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "x", "due_date": "2026-10-10",
+        "due_time": "16:00", "end_time": "16:00",
+    })
+    assert r.status_code == 400
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "x", "due_date": "2026-10-10",
+        "due_time": "15:00", "end_time": "14:00",
+    })
+    assert r.status_code == 400
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "ok", "due_date": "2026-10-10",
+        "due_time": "16:00", "end_time": "17:30",
+    })
+    assert r.status_code == 201
+    assert r.json()["end_time"] == "17:30"
+    assert client.post("/tasks", json={
+        "business_id": bid, "title": "y", "end_time": "25:00",
+    }).status_code == 422
+
+
+def test_attention_conflicts_and_calendar(client):
+    bid = make_business(client)
+    other = make_business(client, name="Other", btype="X")
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    client.post("/tasks", json={
+        "business_id": bid, "title": "A", "due_date": tomorrow,
+        "due_time": "16:00", "end_time": "17:30",
+    })
+    client.post("/tasks", json={
+        "business_id": other, "title": "B", "due_date": tomorrow,
+        "due_time": "16:00", "end_time": "16:30",
+    })
+    client.post("/tasks", json={
+        "business_id": bid, "title": "Undated",
+    })
+    data = client.get("/attention").json()
+    assert len(data["conflicts"]) == 1
+    assert data["conflicts"][0]["tasks"][0]["end_time"] == "17:30"
+
+    cal = client.get("/calendar").json()
+    assert date.fromisoformat(cal["start"]).weekday() == 0
+    assert len(cal["days"]) == 7
+    assert cal["undated_count"] == 1
+    day = [d for d in cal["days"] if d["date"] == tomorrow][0]
+    assert [t["title"] for t in day["tasks"]] == ["A", "B"]
+    assert len(cal["conflicts"]) == 1
+
+    # range filtering: outside range -> no conflicts
+    far = (date.today() + timedelta(days=60)).isoformat()
+    cal2 = client.get(f"/calendar?start={far}&days=7").json()
+    assert cal2["conflicts"] == []
+    assert client.get("/calendar?days=0").json()["days"]
+    assert len(client.get("/calendar?days=99").json()["days"]) == 42
+    assert client.get("/calendar?start=nope").status_code in (400, 422)
+
+
+def test_chat_prompt_includes_conflicts_and_rule(client):
+    bid = make_business(client)
+    other = make_business(client, name="Other", btype="X")
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    client.post("/tasks", json={
+        "business_id": bid, "title": "Class", "due_date": tomorrow,
+        "due_time": "16:00", "end_time": "17:30",
+    })
+    client.post("/tasks", json={
+        "business_id": other, "title": "Pickup", "due_date": tomorrow,
+        "due_time": "16:00", "end_time": "16:30",
+    })
+    response, captured = capture_chat(client, {"message": "conflict?"})
+    assert response.status_code == 200
+    assert "Schedule conflicts" in captured["prompt"]
+    assert '"Class"' in captured["prompt"]
+    assert '"Pickup"' in captured["prompt"]
+    assert "16:00–17:30" in captured["prompt"]
+    assert "until 17:30" in captured["prompt"]
+    assert "never change, move," in captured["prompt"]
+
+
+def test_extraction_end_time(client):
+    bid = make_business(client)
+    ai = {
+        "record_type": "task", "title": "Study group",
+        "person": None, "subject": None,
+        "due_date": "2026-10-10", "due_time": "14:00",
+        "end_time": "16:00", "amount": None, "notes": None,
+    }
+    msg = "Study group tomorrow from 2 to 4 PM"
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(
+            main.requests, "post", return_value=FakeResponse(ai)
+        ):
+            data = client.post("/extract/message", json={
+                "business_id": bid, "message": msg
+            }).json()
+    assert data["due_time"] == "14:00"
+    assert data["end_time"] == "16:00"
+    assert data["due_date"] == "2026-10-10"
+
+    # end before start -> nulled; no due_time -> nulled
+    ai2 = dict(ai, end_time="13:00")
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(
+            main.requests, "post", return_value=FakeResponse(ai2)
+        ):
+            data = client.post("/extract/message", json={
+                "business_id": bid, "message": msg
+            }).json()
+    assert data["end_time"] is None
+
+    ai3 = dict(ai, due_time=None)
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(
+            main.requests, "post", return_value=FakeResponse(ai3)
+        ):
+            data = client.post("/extract/message", json={
+                "business_id": bid, "message": msg
+            }).json()
+    assert data["end_time"] is None
+
+
+def test_suggestion_slot():
+    from attention import find_conflicts
+    d = "2026-10-10"
+    base = [
+        _timed_task(1, d, "16:00", "17:30", title="Econ"),
+        _timed_task(2, d, "16:00", "16:30", title="Sony",
+                    customer="Jamie Lee"),
+    ]
+    c = find_conflicts(base)[0]
+    s = c["suggestion"]
+    # the booking (has customer) moves to 18:00-18:30
+    assert s["move_task_id"] == 2
+    assert s["person"] == "Jamie Lee"
+    assert s["time"] == "18:00" and s["end_time"] == "18:30"
+    assert "Econ" in s["reason"] and "5:30 PM" in s["reason"]
+
+    # a blocker at 18:00-19:00 pushes the suggestion to 19:00
+    c = find_conflicts(base + [
+        _timed_task(3, d, "18:00", "19:00", title="Block")
+    ])[0]
+    assert c["suggestion"]["time"] == "19:00"
+
+    # no slot before 22:00 -> None
+    c = find_conflicts([
+        _timed_task(1, d, "20:00", "22:00"),
+        _timed_task(2, d, "21:00", "22:00", customer="X"),
+    ])[0]
+    assert c["suggestion"] is None
+
+
+def test_clean_reply():
+    reply = '"From your saved records:"\n- task\n\n**Suggestions:**\ndo it'
+    out = main.clean_reply(reply)
+    assert "From your saved records:" in out
+    assert '"From your saved records:"' not in out
+    assert "**Suggestions:**" not in out
+    assert "\nSuggestions:\n" in out
+
+
+def test_end_date_validation_and_calendar_span(client):
+    bid = make_business(client)
+    # end_date without due_date -> 400
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "x", "end_date": "2026-10-12",
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"] == "End needs a start date"
+    # end before start -> 400
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "x",
+        "due_date": "2026-10-12", "end_date": "2026-10-10",
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"] == "End must be after start"
+    # equal -> stored as NULL
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "one-day",
+        "due_date": "2026-10-10", "end_date": "2026-10-10",
+    })
+    assert r.status_code == 201
+    assert r.json()["end_date"] is None
+    # multi-day: any end_time allowed even if <= due_time
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "trip",
+        "due_date": "2026-10-09", "end_date": "2026-10-11",
+        "due_time": "16:00", "end_time": "10:00",
+    })
+    assert r.status_code == 201
+    assert r.json()["end_date"] == "2026-10-11"
+
+    cal = client.get("/calendar?start=2026-10-05&days=7").json()
+    days = {d["date"]: d for d in cal["days"]}
+    for iso, s0, s1 in (
+        ("2026-10-09", True, False),
+        ("2026-10-10", False, False),
+        ("2026-10-11", False, True),
+    ):
+        t = [t for t in days[iso]["tasks"] if t["title"] == "trip"]
+        assert len(t) == 1
+        assert t[0]["span"] is True
+        assert t[0]["span_start"] is s0
+        assert t[0]["span_end"] is s1
+
+    # conflicts ignore multi-day tasks entirely
+    other = make_business(client, name="Other", btype="X")
+    client.post("/tasks", json={
+        "business_id": other, "title": "clash",
+        "due_date": "2026-10-10", "end_date": "2026-10-12",
+        "due_time": "16:00",
+    })
+    assert client.get(
+        "/calendar?start=2026-10-05&days=7"
+    ).json()["conflicts"] == []
+
+
+def test_schedule_patch(client):
+    bid = make_business(client)
+    tid = client.post("/tasks", json={
+        "business_id": bid, "title": "move me",
+        "due_date": "2026-10-10",
+    }).json()["id"]
+    r = client.patch(f"/tasks/{tid}/schedule", json={
+        "due_date": "2026-10-11", "due_time": "09:00",
+        "end_time": "10:00",
+    })
+    assert r.status_code == 200
+    assert r.json()["due_date"] == "2026-10-11"
+    assert r.json()["due_time"] == "09:00"
+    assert r.json()["end_time"] == "10:00"
+    assert r.json()["title"] == "move me"
+
+    r = client.patch(f"/tasks/{tid}/schedule", json={
+        "due_date": "2026-10-11", "due_time": "09:00",
+        "end_time": "08:00",
+    })
+    assert r.status_code == 400
+    assert client.patch("/tasks/9999/schedule", json={}).status_code == 404
+
+
+def test_free_slots():
+    from attention import free_slots
+    d = "2026-10-10"
+    tasks = [_timed_task(1, d, "10:00", "11:00")]
+    assert free_slots(tasks, d) == [
+        {"start": "08:00", "end": "10:00"},
+        {"start": "11:00", "end": "22:00"},
+    ]
+    # point task blocks 30 min
+    tasks = [_timed_task(1, d, "10:00")]
+    assert free_slots(tasks, d)[0] == {
+        "start": "08:00", "end": "10:00",
+    }
+    assert free_slots(tasks, d)[1] == {
+        "start": "10:30", "end": "22:00",
+    }
+    # now rounds up to the next :00/:30
+    now = datetime(2026, 10, 10, 9, 15)
+    assert free_slots(tasks, d, now=now) == [
+        {"start": "09:30", "end": "10:00"},
+        {"start": "10:30", "end": "22:00"},
+    ]
+    # now on a different day doesn't shift the window
+    assert free_slots(
+        tasks, d, now=datetime(2026, 10, 11, 9, 15)
+    )[0] == {"start": "08:00", "end": "10:00"}
+    # min_minutes drops short gaps
+    tasks = [
+        _timed_task(1, d, "09:00", "09:45"),
+        _timed_task(2, d, "10:05", "11:00"),
+    ]
+    assert free_slots(tasks, d) == [
+        {"start": "08:00", "end": "09:00"},
+        {"start": "11:00", "end": "22:00"},
+    ]
+    # completed + multi-day + other-day tasks ignored
+    tasks = [
+        _timed_task(1, d, "10:00", status="completed"),
+        _timed_task(2, "2026-10-11", "10:00", "12:00"),
+        _timed_task(3, d, "10:00", "12:00", end_date="2026-10-12"),
+    ]
+    assert free_slots(tasks, d) == [{"start": "08:00", "end": "22:00"}]
+
+
+def test_briefing_ai_and_fallback(client):
+    bid = make_business(client)
+    tid = client.post("/tasks", json={
+        "business_id": bid, "title": "Write essay",
+    }).json()["id"]
+    client.post("/tasks", json={
+        "business_id": bid, "title": "Class",
+        "due_date": "2026-10-10",
+        "due_time": "16:00", "end_time": "17:30",
+    })
+    slots = [{"start": "08:00", "end": "22:00"}]
+
+    ai = {
+        "summary": "Focus on Write essay today.",
+        "focus": ["Write essay", "Class", "Rest"],
+        "blocks": [
+            # title instead of id, "9:00 AM" -> normalized, kept
+            {"task_id": "write essay", "start": "9:00 AM",
+             "minutes": 45, "why": "quiet morning"},
+            {"task_id": 9999, "start": "10:00", "minutes": 45,
+             "why": "bad id"},
+            # outside all slots -> snaps to earliest slot start
+            {"task_id": tid, "start": "23:00", "minutes": 45,
+             "why": "late"},
+            # overlaps the 08:00 snap -> moves into next free gap
+            {"task_id": tid, "start": "08:00", "minutes": 45,
+             "why": "overlap"},
+        ],
+    }
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 10)):
+        with patch.object(main, "free_slots", return_value=slots):
+            with patch.object(
+                main.requests, "post", return_value=FakeResponse(ai)
+            ):
+                data = client.post("/briefing", json={}).json()
+    assert data["source"] == "ai"
+    assert "Write essay" in data["summary"]
+    assert data["focus"] == ["Write essay", "Class", "Rest"]
+    kept = [(b["start"], b["end"], b["origin"]) for b in data["blocks"]]
+    assert kept == [
+        ("09:00", "09:45", "ai"),  # title matched, time normalized
+        ("08:00", "08:45", "ai"),  # snapped to earliest slot
+        ("09:45", "10:30", "ai"),  # moved past both kept blocks
+    ]
+    assert data["free_slots"] == slots
+    assert data["date"] == "2026-10-10"
+
+    # block overflowing its slot end gets trimmed
+    ai2 = dict(ai, blocks=[
+        {"task_id": tid, "start": "09:00", "minutes": 120,
+         "why": "too long"},
+    ])
+    slots2 = [{"start": "08:00", "end": "09:30"},
+              {"start": "11:00", "end": "12:00"}]
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 10)):
+        with patch.object(main, "free_slots", return_value=slots2):
+            with patch.object(
+                main.requests, "post", return_value=FakeResponse(ai2)
+            ):
+                data = client.post("/briefing", json={}).json()
+    assert data["blocks"][0]["start"] == "09:00"
+    assert data["blocks"][0]["end"] == "09:30"
+
+    # no usable model blocks -> deterministic greedy fill, "auto"
+    ai3 = dict(ai, blocks=[{"task_id": 1, "start": "03:00",
+                            "minutes": 5, "why": "unusable"}])
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 10)):
+        with patch.object(main, "free_slots", return_value=slots):
+            with patch.object(
+                main.requests, "post", return_value=FakeResponse(ai3)
+            ):
+                data = client.post("/briefing", json={}).json()
+    assert data["source"] == "ai"
+    assert data["blocks"]
+    assert all(b["origin"] == "auto" for b in data["blocks"])
+    assert data["blocks"][0]["start"] == "08:00"
+
+    before = client.get("/tasks").json()
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 10)):
+        with patch.object(main, "free_slots", return_value=slots):
+            with patch.object(
+                main.requests, "post",
+                side_effect=main.requests.ConnectionError("down"),
+            ):
+                data = client.post("/briefing", json={}).json()
+    assert data["source"] == "fallback"
+    assert data["blocks"][0]["task_id"] == tid
+    assert data["blocks"][0]["start"] == "08:00"
+    assert data["blocks"][0]["end"] == "08:45"
+    assert client.get("/tasks").json() == before  # no DB writes
+
+
+def test_briefing_truthfulness_guards(client):
+    bid = make_business(client)
+    tid = client.post("/tasks", json={
+        "business_id": bid, "title": "Write essay",
+    }).json()["id"]
+    client.post("/tasks", json={
+        "business_id": bid, "title": "Class",
+        "due_date": "2026-10-10",
+        "due_time": "16:00", "end_time": "17:30",
+    })
+    slots = [{"start": "08:00", "end": "22:00"}]
+
+    def run(ai):
+        with patch.object(
+            main, "ph_today", return_value=date(2026, 10, 10)
+        ):
+            with patch.object(main, "free_slots", return_value=slots):
+                with patch.object(
+                    main.requests, "post", return_value=FakeResponse(ai)
+                ):
+                    return client.post("/briefing", json={}).json()
+
+    # banned "moved/scheduled" language -> deterministic summary,
+    # banned focus item dropped, generic why replaced
+    data = run({
+        "summary": "Class was moved and Write essay is "
+                   "scheduled for 09:00.",
+        "focus": ["Write essay", "Maria was booked for Saturday"],
+        "blocks": [{"task_id": tid, "start": "09:00",
+                    "minutes": 45,
+                    "why": "Quiet morning while your mind is fresh"}],
+    })
+    assert data["source"] == "ai"
+    assert "scheduled" not in data["summary"]
+    assert "due today" in data["summary"]
+    assert data["focus"] == ["Write essay"]
+    assert data["blocks"][0]["why"] == (
+        "No deadline — good use of free time "
+        "· Quiet morning while your mind is fresh"
+    )
+
+    # a time that appears in no record/slot/block -> fallback summary
+    data = run({
+        "summary": "Meet Jamie at 10:30 for the pickup.",
+        "focus": ["Write essay"],
+        "blocks": [{"task_id": tid, "start": "09:00",
+                    "minutes": 45, "why": "quiet morning"}],
+    })
+    assert "10:30" not in data["summary"]
+    assert "due today" in data["summary"]
+
+    # a saved task time today is allowed in the summary
+    data = run({
+        "summary": "You have class at 16:00 today.",
+        "focus": ["Write essay"],
+        "blocks": [{"task_id": tid, "start": "09:00",
+                    "minutes": 45, "why": "quiet morning"}],
+    })
+    assert data["summary"] == "You have class at 16:00 today."
+
+
+def test_auto_space_extraction(client):
+    camera = make_business(client, name="Camera Rental",
+                           btype="Camera Rental")
+    personal = make_business(client, name="Personal Goals",
+                             btype="Personal")
+    client.put(f"/businesses/{personal}", json={
+        "name": "Personal Goals", "business_type": "Personal",
+        "category": "Personal",
+        "description": "Health, appointments, dental",
+    })
+
+    ai = {
+        "record_type": "booking_request",
+        "title": "Confirm camera booking",
+        "person": "Maria", "subject": "Camera",
+        "due_date": "2026-10-10", "due_time": "15:00",
+        "end_time": None, "amount": None, "notes": None,
+        "space_id": camera, "space_reason": "it is a camera rental",
+    }
+    msg = "Maria wants to rent the camera on Saturday at 3 PM"
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(
+            main.requests, "post", return_value=FakeResponse(ai)
+        ):
+            data = client.post("/extract/message", json={
+                "message": msg
+            }).json()
+    assert data["business_id"] == camera
+    assert data["space_auto"] is True
+    assert data["space_source"] == "ai"
+    assert "camera" in data["space_reason"]
+
+    # invalid id -> deterministic keyword fallback
+    ai2 = {
+        "record_type": "appointment",
+        "title": "Schedule dental appointment",
+        "person": None, "subject": "Dental",
+        "due_date": "2026-10-13", "due_time": None,
+        "end_time": None, "amount": None, "notes": None,
+        "space_id": 9999, "space_reason": "wrong",
+    }
+    msg2 = "Schedule my dental appointment next Tuesday."
+    with patch.object(main, "ph_today", return_value=date(2026, 10, 9)):
+        with patch.object(
+            main.requests, "post", return_value=FakeResponse(ai2)
+        ):
+            data = client.post("/extract/message", json={
+                "message": msg2
+            }).json()
+    assert data["business_id"] == personal
+    assert data["space_auto"] is True
+    assert data["space_source"] == "keyword"
+    assert data["space_reason"] == "best keyword match"
+
+    # explicit space keeps old behaviour
+    with patch.object(
+        main.requests, "post", return_value=FakeResponse(ai2)
+    ):
+        data = client.post("/extract/message", json={
+            "business_id": camera, "message": msg2
+        }).json()
+    assert data["business_id"] == camera
+    assert data["space_auto"] is False
+    assert data["space_reason"] is None

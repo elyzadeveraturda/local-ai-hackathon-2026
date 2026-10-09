@@ -1,6 +1,7 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "./api";
+import RichText from "./RichText";
 
 const SUGGESTIONS = [
   "What should I prioritize today?",
@@ -9,30 +10,37 @@ const SUGGESTIONS = [
   "What scholarship requirements do I need to finish?",
   "Help me plan my study session.",
   "Help me brainstorm TikTok content ideas.",
+  "Draft a reply for my most urgent task",
 ];
 
-export default function AskSoloOps() {
-  const [spaces, setSpaces] = useState([]);
-  const [scope, setScope] = useState("all");
-  const [spaceId, setSpaceId] = useState("");
+export default function AskSoloOps({
+  spaces,
+  initialSpaceId,
+  initialQuestion,
+  autoAsk,
+}) {
+  const [scope, setScope] = useState(initialSpaceId ? "space" : "all");
+  const [spaceId, setSpaceId] = useState(
+    initialSpaceId ? String(initialSpaceId) : ""
+  );
   const [message, setMessage] = useState("");
   const [exchanges, setExchanges] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const askedRef = useRef(false);
 
   useEffect(() => {
-    apiFetch("/businesses")
-      .then((data) => {
-        setSpaces(data);
-        if (data.length > 0) setSpaceId(String(data[0].id));
-      })
-      .catch((err) => setError(err.message));
-  }, []);
+    if (spaces.length > 0 && !spaceId) {
+      setSpaceId(String(initialSpaceId || spaces[0].id));
+    }
+  }, [spaces, spaceId, initialSpaceId]);
 
-  async function ask() {
-    const text = message.trim();
-    if (!text || loading) return;
-    if (scope === "space" && !spaceId) return;
+  async function ask(text, scopeOverride, spaceOverride) {
+    const q = (text ?? message).trim();
+    const useScope = scopeOverride ?? scope;
+    const useSpace = spaceOverride ?? spaceId;
+    if (!q || loading) return;
+    if (useScope === "space" && !useSpace) return;
 
     setLoading(true);
     setError("");
@@ -41,13 +49,13 @@ export default function AskSoloOps() {
       const data = await apiFetch("/chat", {
         method: "POST",
         body: JSON.stringify({
-          message: text,
-          space_id: scope === "space" ? Number(spaceId) : null,
+          message: q,
+          space_id: useScope === "space" ? Number(useSpace) : null,
         }),
       });
       setExchanges((prev) => [
         ...prev,
-        { question: text, reply: data.reply, sources: data.sources },
+        { question: q, reply: data.reply, sources: data.sources },
       ]);
       setMessage("");
     } catch (err) {
@@ -57,6 +65,18 @@ export default function AskSoloOps() {
     }
   }
 
+  useEffect(() => {
+    if (autoAsk && initialQuestion && !askedRef.current) {
+      askedRef.current = true;
+      ask(
+        initialQuestion,
+        initialSpaceId ? "space" : "all",
+        initialSpaceId ? String(initialSpaceId) : ""
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAsk, initialQuestion]);
+
   function onKeyDown(e) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -65,29 +85,33 @@ export default function AskSoloOps() {
   }
 
   return (
-    <section className="extractor-page">
-      <h1>Ask SoloOps</h1>
-      <p>
-        Your private assistant, grounded only in what you've saved.
-        Conversations are not stored.
-      </p>
+    <>
+      <div className="page-head">
+        <h1>Assistant</h1>
+        <p className="page-sub">
+          Context-aware help grounded only in what you've saved. It
+          never changes your tasks or bookings.
+        </p>
+      </div>
 
-      <div className="extractor-card">
+      <div className="card" style={{ marginBottom: 20 }}>
         <div className="scope-toggle">
-          <button
-            type="button"
-            className={scope === "all" ? "chip chip-active" : "chip"}
-            onClick={() => setScope("all")}
-          >
-            All Spaces
-          </button>
-          <button
-            type="button"
-            className={scope === "space" ? "chip chip-active" : "chip"}
-            onClick={() => setScope("space")}
-          >
-            Selected Space
-          </button>
+          <div className="seg">
+            <button
+              type="button"
+              className={scope === "all" ? "seg-active" : ""}
+              onClick={() => setScope("all")}
+            >
+              All spaces
+            </button>
+            <button
+              type="button"
+              className={scope === "space" ? "seg-active" : ""}
+              onClick={() => setScope("space")}
+            >
+              One space
+            </button>
+          </div>
           {scope === "space" && (
             <select
               value={spaceId}
@@ -111,50 +135,61 @@ export default function AskSoloOps() {
               type="button"
               className="chip"
               key={suggestion}
-              onClick={() => setMessage(suggestion)}
+              onClick={() => ask(suggestion)}
             >
               {suggestion}
             </button>
           ))}
         </div>
 
-        <textarea
-          rows={4}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask about your tasks, deadlines, or responsibilities..."
-        />
+        <label className="field-label">
+          Message
+          <textarea
+            className="control"
+            rows={4}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about your tasks, deadlines, or responsibilities..."
+          />
+        </label>
 
         <button
-          onClick={ask}
+          className="btn"
+          style={{ marginTop: 12 }}
+          onClick={() => ask()}
           disabled={
             loading || !message.trim() || (scope === "space" && !spaceId)
           }
         >
-          {loading ? "Thinking..." : "Ask Local AI →"}
+          {loading ? "Thinking..." : "Ask local AI"}
         </button>
 
         {error && <p className="extractor-error">{error}</p>}
       </div>
 
-      {exchanges.map((exchange, i) => (
-        <div className="extractor-card" key={i}>
-          <p>
-            <strong>You:</strong> {exchange.question}
-          </p>
-          <div className="ai-response">
-            <strong>SoloOps</strong>
-            <p style={{ whiteSpace: "pre-wrap" }}>{exchange.reply}</p>
-            {exchange.sources && (
-              <small className="muted">
-                Grounded in {exchange.sources.task_count} saved tasks
-                from: {exchange.sources.spaces.join(", ") || "none"}
-              </small>
-            )}
-          </div>
+      {exchanges.length > 0 && (
+        <div className="card">
+          {exchanges.map((exchange, i) => (
+            <div className="conv" key={i}>
+              <div className="bubble bubble-user">
+                {exchange.question}
+              </div>
+              <div className="bubble bubble-ai">
+                <RichText text={exchange.reply} />
+                {exchange.sources && (
+                  <small className="muted">
+                    Grounded in {exchange.sources.task_count} saved
+                    tasks from:{" "}
+                    {exchange.sources.spaces.join(", ") || "none"}
+                  </small>
+                )}
+              </div>
+            </div>
+          ))}
+          {loading && <p className="muted">Thinking...</p>}
         </div>
-      ))}
-    </section>
+      )}
+    </>
   );
 }
