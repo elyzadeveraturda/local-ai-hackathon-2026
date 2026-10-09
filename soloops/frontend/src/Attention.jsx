@@ -59,7 +59,7 @@ export default function Attention({ onLockIn, onData }) {
 
       {groups.length === 0 && (
         <p className="muted">
-          No pending tasks. Save a task from AI Extraction to see it here.
+          No pending tasks. Capture something with AI Capture to see it here.
         </p>
       )}
 
@@ -73,7 +73,10 @@ export default function Attention({ onLockIn, onData }) {
               <div className="task-main">
                 <strong>{task.title}</strong>
                 <small>
-                  <span className="business-pill">{task.business_name}</span>
+                  <span className="business-pill">
+                    {task.space_category ? `${task.space_category} · ` : ""}
+                    {task.business_name}
+                  </span>
                   {task.customer && ` · ${task.customer}`}
                   {task.item && ` · ${task.item}`}
                   {task.amount != null && ` · ₱${task.amount}`}
@@ -110,7 +113,10 @@ export default function Attention({ onLockIn, onData }) {
                 <div className="task-main">
                   <strong>{task.title}</strong>
                   <small>
-                    <span className="business-pill">{task.business_name}</span>
+                    <span className="business-pill">
+                      {task.space_category ? `${task.space_category} · ` : ""}
+                      {task.business_name}
+                    </span>
                   </small>
                 </div>
                 <span className="due">{formatDue(task)}</span>

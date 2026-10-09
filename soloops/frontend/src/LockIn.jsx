@@ -130,7 +130,10 @@ export default function LockIn({ initialTaskId }) {
           <div className="lockin-task">
             <strong>{task.title}</strong>
             <small>
-              <span className="business-pill">{task.business_name}</span>
+              <span className="business-pill">
+                {task.space_category ? `${task.space_category} · ` : ""}
+                {task.business_name}
+              </span>
               {task.customer && ` · ${task.customer}`}
               {task.item && ` · ${task.item}`}
               {task.due_date &&
