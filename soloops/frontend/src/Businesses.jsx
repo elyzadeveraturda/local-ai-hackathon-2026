@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
+import { categoryBadgeStyle } from "./spaces";
 
 const SPACE_CATEGORIES = [
   "Academic",
@@ -243,7 +244,10 @@ export default function Businesses({ onCountChange }) {
         {businesses.map((business) => (
           <article className="business-card" key={business.id}>
             <h3>{business.name}</h3>
-            <span className="category-badge">
+            <span
+              className="category-badge"
+              style={categoryBadgeStyle(business.category)}
+            >
               {business.category || "Business"}
             </span>{" "}
             <span>{business.business_type}</span>
