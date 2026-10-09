@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 import Businesses from "./Businesses";
+import MessageExtractor from "./MessageExtractor";
 
 const API = "http://127.0.0.1:8000";
 
@@ -69,6 +70,13 @@ function App() {
           onClick={() => setPage("businesses")}
         >
           ▣ My Businesses
+        </button>
+
+        <button
+          className={page === "extract" ? "nav-active" : ""}
+          onClick={() => setPage("extract")}
+        >
+          ✦ AI Extraction
         </button>
 
         <div>▤ Calendar</div>
@@ -145,9 +153,11 @@ function App() {
           )}
         </section>
          </>
-    ) : (
-      <Businesses onCountChange={setBusinessCount} />
-    )}
+          ) : page === "businesses" ? (
+          <Businesses onCountChange={setBusinessCount} />
+        ) : page === "extract" ? (
+          <MessageExtractor />
+        ) : null}
       </main>
     </div>
   );
