@@ -1,11 +1,24 @@
 export const SPACE_PALETTE = [
-  "#6f62a8",
-  "#a8763e",
-  "#3f7f86",
-  "#b0566f",
-  "#5c7f4a",
-  "#7a7266",
+  "#6c5ce7",
+  "#2f80ed",
+  "#14b8a6",
+  "#f2994a",
+  "#ec4899",
+  "#22c55e",
 ];
+
+export const CATEGORY_BADGE = {
+  Academic: { bg: "#f0edff", color: "#6c5ce7" },
+  Business: { bg: "#e8f4ff", color: "#2f80ed" },
+  "Content Creation": { bg: "#fff1e8", color: "#f2994a" },
+  Personal: { bg: "#e9f9f1", color: "#27ae60" },
+  Custom: { bg: "#f1f2f6", color: "#6b7390" },
+};
+
+export function categoryBadgeStyle(category) {
+  const s = CATEGORY_BADGE[category] || CATEGORY_BADGE.Custom;
+  return { background: s.bg, color: s.color };
+}
 
 export const CATEGORY_ICON = {
   Academic: "◇",
