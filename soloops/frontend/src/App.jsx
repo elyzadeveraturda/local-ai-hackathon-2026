@@ -228,6 +228,7 @@ function App() {
             attention={attention}
             onNavigate={navigate}
             onChanged={refresh}
+            onLockIn={openLockIn}
           />
         )}
         {page === "ask" && (
