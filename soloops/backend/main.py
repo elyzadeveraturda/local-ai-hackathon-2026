@@ -46,6 +46,21 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 MODEL = "qwen2.5:3b"
 
 
+def ai_error_detail(exc):
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return (
+            "Local AI is not reachable. Start Ollama (open the Ollama app "
+            "or run `ollama serve`) and try again."
+        )
+    response = getattr(exc, "response", None)
+    if response is not None and response.status_code == 404:
+        return (
+            f"Model {MODEL} is not installed. Run `ollama pull {MODEL}` "
+            "and try again."
+        )
+    return "Local AI returned an unexpected response. Please try again."
+
+
 class ChatRequest(BaseModel):
     message: str
 
@@ -72,6 +87,23 @@ def health():
         return {"ollama": "disconnected"}
 
 
+def describe_due(task):
+    if not task.get("due_date"):
+        return "no due date"
+    when = task["due_date"]
+    if task.get("due_time"):
+        when += f" {task['due_time']}"
+    days = task.get("days_until_due")
+    if days is None:
+        return when
+    if days < 0:
+        n = -days
+        return f"{when} (OVERDUE by {n} day{'s' if n != 1 else ''})"
+    if days == 0:
+        return f"{when} (due TODAY)"
+    return f"{when} (in {days} day{'s' if days != 1 else ''})"
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     businesses_text = "\n".join(
@@ -82,7 +114,7 @@ def chat(request: ChatRequest):
     tasks_text = "\n".join(
         f"- [{t['priority_label']}] {t['title']} | business: "
         f"{t['business_name']} | customer: {t.get('customer') or 'n/a'} | "
-        f"due: {t.get('due_date') or 'none'} {t.get('due_time') or ''}".rstrip()
+        f"due: {describe_due(t)}"
         for t in pending
     ) or "- none"
 
@@ -100,6 +132,8 @@ Do not invent business records or claim to have
 checked calendars, payments, or inventory.
 Only refer to the saved records listed below. If the
 answer is not in them, say you don't have that record.
+Copy due dates and their status (overdue / today / in N days)
+exactly as written; never recalculate or change them.
 
 Today's date (Philippines): {ph_today().isoformat()}
 
@@ -130,7 +164,7 @@ User message:
     except (requests.RequestException, KeyError, ValueError) as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Local AI unavailable: {exc}"
+            detail=ai_error_detail(exc)
         )
 
 
@@ -383,7 +417,7 @@ Customer message:
     except (requests.RequestException, ValueError, KeyError) as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Extraction failed: {exc}"
+            detail=ai_error_detail(exc)
         )
 
 
@@ -542,7 +576,8 @@ You are SoloOps, helping a solo entrepreneur focus on ONE task
 during a 25-minute work session.
 
 Use ONLY the stored task details below. Do not invent customers,
-prices, dates, or facts that are not listed.
+prices, dates, tools, or systems (e.g. inventory or CRM software)
+that are not listed.
 
 {describe_task(task)}
 
