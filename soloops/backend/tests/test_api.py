@@ -204,4 +204,28 @@ def test_ollama_down_is_graceful(client):
             "business_id": bid, "message": "hello"
         })
         assert r.status_code == 503
+        assert "Start Ollama" in r.json()["detail"]
         assert client.post("/chat", json={"message": "hi"}).status_code == 503
+
+
+def test_chat_prompt_states_overdue_explicitly(client):
+    bid = make_business(client)
+    client.post("/tasks", json={
+        "business_id": bid, "title": "Old", "due_date": "2000-01-01"
+    })
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["prompt"] = json["prompt"]
+        return FakeResponse({})
+
+    class ChatResponse(FakeResponse):
+        def json(self):
+            return {"response": "ok"}
+
+    with patch.object(
+        main.requests, "post",
+        side_effect=lambda *a, **k: (fake_post(*a, **k), ChatResponse({}))[1],
+    ):
+        assert client.post("/chat", json={"message": "hi"}).json() == {"reply": "ok"}
+    assert "2000-01-01 (OVERDUE by" in captured["prompt"]
