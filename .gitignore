@@ -224,3 +224,5 @@ soloops/backend/*.db
 soloops/backend/*.db-journal
 node_modules/
 dist/
+
+soloops/backend/backups/
