@@ -1,0 +1,1 @@
+# local-ai-hackathon-2026
