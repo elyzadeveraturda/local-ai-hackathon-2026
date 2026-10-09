@@ -1,17 +1,17 @@
-# SoloOps — Offline AI Business Command Center
+# SoloOps AI — Your Private, Offline Personal AI Assistant
 
-> SoloOps gives solo entrepreneurs the organization of a team and the assistance of AI without sending their private business data to the cloud.
+> One person. Multiple roles. One private AI assistant.
 
-SoloOps is a private, local-first workspace for solo entrepreneurs running one or more businesses of **any** type (online shop, freelancer, rental, food, services, ...). All AI inference runs on your machine through [Ollama](https://ollama.com) using `qwen2.5:3b`. Data is stored in a local SQLite file.
+SoloOps AI is a private, local-first assistant for one person juggling many roles — a student keeping up with classes and a scholarship, running a camera rental side business, helping manage the family's rental property, posting on TikTok, and staying on top of personal life. Each role is a **Space**; everything you save stays in a local SQLite file, and all AI inference runs on your machine through [Ollama](https://ollama.com) using `qwen2.5:3b`.
 
 ## Features
 
-- **Business workspaces** — create/edit/delete any kind of business.
-- **AI message extraction** — paste a customer message; local AI extracts customer, item/service, date, time, amount and the action required, using the selected business as context.
+- **My Spaces** — organize every part of your life into spaces across 5 categories (Academic, Business, Content Creation, Personal, Custom), each with a free-text type and description. Quick-fill templates (College & Scholarship, Camera Rental, Family Property, TikTok Content, Personal Goals) prefill the form without saving.
+- **AI Capture** — paste any text or message (school notices, booking requests, content to-dos, personal reminders); local AI extracts `record_type`, `title`, `person`, `subject`, `due_date`, `due_time`, `amount` and `notes`, using the selected space's name/category/type/description as context. Deterministic guards post-process the model output: relative weekday phrases ("next Tuesday", "by Friday") are resolved to real dates in code, hallucinated dates/amounts/people with no textual evidence are nulled, and titles are stripped of date/time fragments.
 - **Review & Save as Task** — every extracted field is editable before saving; validation, clear errors, and duplicate-save protection (UI lock + backend `409`).
-- **Today's Attention** (Dashboard) — all pending tasks across businesses, prioritised deterministically in Philippine time: Overdue → Due today → Due within 3 days → Later → No date. Real counts, mark complete / reopen.
-- **Lock In Mode** — pick a task, 25-minute Pomodoro (start/pause/reset), a local-AI focus plan built from the task's stored details (with a deterministic fallback checklist if Ollama is down), tickable checklist, complete the task.
-- **Grounded AI chat** — "Ask SoloOps AI" on the dashboard answers using your saved businesses and pending tasks.
+- **Today's Attention** (Dashboard) — all pending tasks across every space, prioritised deterministically in Philippine time: Overdue → Due today → Due within 3 days → Later → No date. Real counts, mark complete / reopen.
+- **Ask SoloOps** — grounded Q&A over your saved records, scoped to **All Spaces** or a **Selected Space**. Only saved records are treated as facts: answers start with "From your saved records:" (task titles, spaces, due status) followed by clearly-labelled "Suggestions:". Conversations are never stored.
+- **Lock In Mode** — pick one task, get a context-aware focus plan from local AI (tailored to the space's category — studying, content editing, customer follow-up, errands), a 25-minute Pomodoro timer (start/pause/reset), a tickable checklist, and a deterministic fallback checklist if Ollama is down.
 
 ## Requirements
 
@@ -55,9 +55,19 @@ cd soloops/frontend
 npm run dev
 ```
 
-Open http://localhost:5173. Everything binds to `127.0.0.1`/`localhost` only, so business records are not exposed on your network.
+Open http://localhost:5173. Everything binds to `127.0.0.1`/`localhost` only, so your records are not exposed on your network.
 
-The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place — the only migration is an additive `ALTER TABLE tasks ADD COLUMN due_time`. Set `SOLOOPS_DB_PATH` to use a different file.
+The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `businesses.category` default `'Business'`). Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
+
+```bash
+cp soloops/backend/soloops.db soloops/backend/backups/soloops-$(date +%Y%m%d-%H%M%S).db
+```
+
+## Privacy
+
+- All AI inference runs locally via Ollama at `127.0.0.1:11434` (`qwen2.5:3b`); the FastAPI backend binds to `127.0.0.1` and the Vite dev server to `localhost`.
+- No cloud APIs, no telemetry, no external services. The frontend loads no external fonts, scripts, or assets — everything is served locally. Chat conversations are held in React state only and are never written to disk.
+- Verify offline operation yourself with the manual test below.
 
 ## Tests
 
@@ -74,51 +84,52 @@ npm run build && npm run lint
 
 1. Make sure `qwen2.5:3b` is already pulled (`ollama list`).
 2. Start Ollama, the backend and the frontend as above.
-3. **Turn Wi-Fi off.**
-4. Walk through the demo flow below. Extraction, Lock In plans and chat should all still work.
-5. Optional: stop Ollama — extraction/chat show a clear "Local AI unavailable" error, while Today's Attention, tasks, and Lock In (fallback checklist) keep working.
+3. **Turn Wi-Fi off** (Control Center) and unplug ethernet.
+4. Verify: `curl http://127.0.0.1:11434/api/tags` responds, and `curl http://127.0.0.1:8000/health` returns `{"ollama":"connected"}`.
+5. Run an AI Capture, generate a Lock In plan (badge shows "Generated by local AI"), and ask a question in Ask SoloOps — all should work.
+6. Optional: quit Ollama entirely — AI Capture and Ask SoloOps show a clear "Local AI unavailable" error, while the Dashboard, tasks, and Lock In's fallback checklist keep working.
 
-## Demo flow / acceptance test
+## Acceptance workflows
 
-1. **My Businesses** → create e.g. "Lola Bakes" / "Home bakery".
-2. **AI Extraction** → select it, paste:
-   `Hi! This is Maria Santos. Can I order a chocolate ube cake for October 12 at 3pm pickup? Budget is PHP 1,800. Please confirm.`
-3. Click **Extract Information**, review/correct the fields, click **Save as Task**.
-4. Refresh the browser → **Dashboard**: the task appears in **Today's Attention** with its business and priority.
-5. Click **Lock In** → **Generate Plan** → **Start** the timer → tick checklist items → **Mark Task Complete**.
-6. Back on the Dashboard the task is under "Show completed" and the counts update.
+1. **Academic** — My Spaces → click the *College & Scholarship* template chip → Create Space → AI Capture → select it, paste `Reminder: Scholarship renewal documents must be submitted on October 15.` → Analyze with Local AI → review → Save as Task → Dashboard shows it under Today's Attention → Lock In → Generate Plan → Start the timer → tick a step → Mark Task Complete.
+2. **Business** — create a Camera Rental space → AI Capture → paste `Maria wants to rent the camera on Saturday at 3 PM.` → extraction fills person, subject, date and time → Save → refresh the browser → the task persists in Today's Attention.
+3. **Content** — create a TikTok Content space → AI Capture → paste `I need to finish editing my TikTok video by Friday.` → Save → Ask SoloOps → "What should I prioritize today?" → the reply cites the task under "From your saved records:".
+4. **Offline** — follow the manual offline test above; every feature except live AI inference works without any network.
 
 ## 60–90 second demo script
 
-> **(0:00)** "Solo entrepreneurs juggle customers across several businesses with no team and no time. Cloud AI means handing over private customer data. SoloOps fixes both — and it runs completely offline." *(show Wi-Fi off)*
+> **(0:00)** "Meet a college student who's also running a camera rental, helping with the family's rental property, and posting on TikTok. Four roles, one brain — and no assistant. SoloOps AI is that assistant, and it runs entirely on this laptop." *(Wi-Fi off in menu bar)*
 >
-> **(0:12)** "I run a home bakery *and* a camera rental. Each is a workspace — SoloOps works for any business type." *(show My Businesses)*
+> **(0:12)** "Each role is a Space — Academic, Business, Content, Personal." *(My Spaces, show the four cards)*
 >
-> **(0:20)** "A customer messages me. I paste it in, and qwen2.5 running locally on my Mac pulls out the customer, the cake, the date, time and budget." *(Extract)* "AI can make mistakes, so I can fix anything before saving." *(edit a field, Save as Task)*
+> **(0:20)** "Anything that lands on my plate, I paste into AI Capture. A scholarship notice…" *(paste, Analyze with Local AI)* "…qwen2.5 running locally pulls out the action and the October 15 deadline. It never invents details, and I review before saving." *(Save)* "Same for a camera booking — Maria, Saturday, 3 PM." *(capture + save)*
 >
-> **(0:40)** "My Dashboard is Today's Attention: every task across all businesses, ranked by plain code — overdue first, then today, then the next three days. No AI guessing about what's urgent." *(show buckets and counts)*
+> **(0:40)** "Today's Attention ranks everything across every space with plain code: overdue, today, next three days." *(Dashboard)*
 >
-> **(0:55)** "When it's time to work, I hit Lock In. Local AI turns the task into a checklist using the real order details, and I start a 25-minute focus timer." *(Generate Plan, Start, tick items)*
+> **(0:50)** "Ask SoloOps: what should I prioritize today?" *(ask)* "The answer separates what's actually saved from AI suggestions — it only knows what I chose to save, and nothing leaves my machine."
 >
-> **(1:10)** "Done — mark it complete and it's off my list." *(Complete, back to dashboard)* "The organization of a team, the help of AI, and my business data never leaves my laptop. That's SoloOps."
+> **(1:05)** "Time to work: Lock In on the scholarship task. Local AI builds a checklist from the task and my space, and the 25-minute timer starts." *(Generate Plan, Start, tick a step, Mark Complete)*
+>
+> **(1:20)** "One person. Multiple roles. One private AI assistant. That's SoloOps AI."
 
 ## Project structure
 
 ```text
 soloops/
 ├── backend/
-│   ├── main.py            # FastAPI app: businesses, extraction, tasks, /attention, /lock-in/plan, /chat
+│   ├── main.py            # FastAPI app: spaces, extraction, tasks, /attention, /lock-in/plan, /chat
 │   ├── attention.py       # deterministic priority logic (Asia/Manila dates)
-│   ├── database.py        # SQLite access + additive migration
+│   ├── database.py        # SQLite access + additive migrations
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   └── tests/test_api.py
 └── frontend/src/
-    ├── App.jsx            # layout, dashboard, AI chat
+    ├── App.jsx            # layout, dashboard, nav
     ├── Attention.jsx      # Today's Attention
     ├── LockIn.jsx         # Lock In Mode
-    ├── MessageExtractor.jsx
-    ├── Businesses.jsx
+    ├── MessageExtractor.jsx  # AI Capture
+    ├── AskSoloOps.jsx     # grounded Q&A
+    ├── Businesses.jsx     # My Spaces
     └── api.js             # API base URL (VITE_API_URL override) + fetch helper
 ```
 
@@ -127,4 +138,4 @@ soloops/
 - No authentication (single local user by design).
 - Due dates are date + optional time; no schedule-conflict detection yet.
 - Pomodoro state is not persisted across page reloads.
-- AI output quality depends on the 3B model; always review extractions.
+- AI output quality depends on the 3B model; deterministic guards catch the common failure modes, but always review extractions.

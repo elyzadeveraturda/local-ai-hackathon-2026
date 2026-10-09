@@ -567,3 +567,57 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 16px;
+}
+
+.chip {
+  border: 1px solid #dcdfea;
+  background: #f5f3ff;
+  color: #6654d9;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chip:hover {
+  border-color: #6654d9;
+}
+
+.chip-active,
+.chip.chip-active {
+  background: #6654d9;
+  border-color: #6654d9;
+  color: white;
+}
+
+.category-badge {
+  background: #f5f3ff;
+  color: #6654d9;
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.scope-toggle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.scope-toggle select {
+  padding: 8px 10px;
+  border: 1px solid #dcdfea;
+  border-radius: 9px;
+  font: inherit;
+}

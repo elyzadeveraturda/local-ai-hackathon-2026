@@ -1,10 +1,57 @@
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "./api";
 
-const API = "http://127.0.0.1:8000";
+const SPACE_CATEGORIES = [
+  "Academic",
+  "Business",
+  "Content Creation",
+  "Personal",
+  "Custom",
+];
+
+const TEMPLATES = [
+  {
+    label: "College & Scholarship",
+    name: "College & Scholarship",
+    category: "Academic",
+    business_type: "Scholarship & Studies",
+    description:
+      "Classes, exams and scholarship renewal requirements",
+  },
+  {
+    label: "Camera Rental",
+    name: "Camera Rental",
+    category: "Business",
+    business_type: "Camera Rental",
+    description: "Renting cameras and lenses to customers",
+  },
+  {
+    label: "Family Property",
+    name: "Family Property",
+    category: "Business",
+    business_type: "Housing Rental",
+    description: "Helping manage the family's housing rental units",
+  },
+  {
+    label: "TikTok Content",
+    name: "TikTok Content",
+    category: "Content Creation",
+    business_type: "TikTok",
+    description: "Planning, filming and editing TikTok videos",
+  },
+  {
+    label: "Personal Goals",
+    name: "Personal Goals",
+    category: "Personal",
+    business_type: "Personal",
+    description: "Health, appointments and personal commitments",
+  },
+];
 
 const emptyForm = {
   name: "",
+  category: "Academic",
   business_type: "",
   description: "",
 };
@@ -18,10 +65,7 @@ export default function Businesses({ onCountChange }) {
 
   async function loadBusinesses() {
     try {
-      const response = await fetch(`${API}/businesses`);
-      if (!response.ok) throw new Error("Cannot load businesses");
-
-      const data = await response.json();
+      const data = await apiFetch("/businesses");
       setBusinesses(data);
       onCountChange?.(data.length);
       setError("");
@@ -38,6 +82,7 @@ export default function Businesses({ onCountChange }) {
     setEditingId(business.id);
     setForm({
       name: business.name,
+      category: business.category || "Business",
       business_type: business.business_type,
       description: business.description,
     });
@@ -48,12 +93,22 @@ export default function Businesses({ onCountChange }) {
     setForm(emptyForm);
   }
 
+  function applyTemplate(template) {
+    setEditingId(null);
+    setForm({
+      name: template.name,
+      category: template.category,
+      business_type: template.business_type,
+      description: template.description,
+    });
+  }
+
   async function save(event) {
     event.preventDefault();
     if (busy) return;
 
     if (!form.name.trim() || !form.business_type.trim()) {
-      setError("Business name and type are required.");
+      setError("Space name and type are required.");
       return;
     }
 
@@ -62,16 +117,13 @@ export default function Businesses({ onCountChange }) {
 
     try {
       const url = editingId
-        ? `${API}/businesses/${editingId}`
-        : `${API}/businesses`;
+        ? `/businesses/${editingId}`
+        : "/businesses";
 
-      const response = await fetch(url, {
+      await apiFetch(url, {
         method: editingId ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-
-      if (!response.ok) throw new Error("Could not save business");
 
       cancel();
       await loadBusinesses();
@@ -83,18 +135,18 @@ export default function Businesses({ onCountChange }) {
   }
 
   async function remove(id) {
-    if (!window.confirm("Delete this business workspace?")) {
+    if (
+      !window.confirm(
+        "Delete this space? All of its tasks will also be deleted."
+      )
+    ) {
       return;
     }
 
     setBusy(true);
 
     try {
-      const response = await fetch(`${API}/businesses/${id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Could not delete business");
+      await apiFetch(`/businesses/${id}`, { method: "DELETE" });
 
       if (editingId === id) cancel();
       await loadBusinesses();
@@ -107,14 +159,30 @@ export default function Businesses({ onCountChange }) {
 
   return (
     <section className="business-page">
-      <h2>My Businesses</h2>
-      <p>Create and manage any type of business.</p>
+      <h2>My Spaces</h2>
+      <p>
+        Organize every part of your life — school, business, content,
+        personal.
+      </p>
+
+      <div className="chip-row">
+        {TEMPLATES.map((template) => (
+          <button
+            type="button"
+            className="chip"
+            key={template.label}
+            onClick={() => applyTemplate(template)}
+          >
+            {template.label}
+          </button>
+        ))}
+      </div>
 
       <form className="business-form" onSubmit={save}>
-        <h3>{editingId ? "Edit Business" : "New Business"}</h3>
+        <h3>{editingId ? "Edit Space" : "New Space"}</h3>
 
         <input
-          placeholder="Business name"
+          placeholder="Space Name"
           maxLength={100}
           value={form.name}
           onChange={(e) =>
@@ -123,8 +191,21 @@ export default function Businesses({ onCountChange }) {
           required
         />
 
+        <select
+          value={form.category}
+          onChange={(e) =>
+            setForm({ ...form, category: e.target.value })
+          }
+        >
+          {SPACE_CATEGORIES.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+
         <input
-          placeholder="Business type (e.g. Online Shop)"
+          placeholder="Space Type (e.g. Scholarship, Camera Rental, TikTok)"
           maxLength={100}
           value={form.business_type}
           onChange={(e) =>
@@ -134,7 +215,7 @@ export default function Businesses({ onCountChange }) {
         />
 
         <textarea
-          placeholder="Describe what your business does..."
+          placeholder="Describe this part of your life (goals, responsibilities)..."
           maxLength={1000}
           value={form.description}
           onChange={(e) =>
@@ -145,7 +226,7 @@ export default function Businesses({ onCountChange }) {
 
         <div className="business-actions">
           <button type="submit" disabled={busy}>
-            {editingId ? "Save Changes" : "+ Create Business"}
+            {editingId ? "Save Changes" : "+ Create Space"}
           </button>
 
           {editingId && (
@@ -162,6 +243,9 @@ export default function Businesses({ onCountChange }) {
         {businesses.map((business) => (
           <article className="business-card" key={business.id}>
             <h3>{business.name}</h3>
+            <span className="category-badge">
+              {business.category || "Business"}
+            </span>{" "}
             <span>{business.business_type}</span>
             <p>{business.description || "No description yet."}</p>
 
@@ -181,7 +265,7 @@ export default function Businesses({ onCountChange }) {
       </div>
 
       {businesses.length === 0 && !error && (
-        <p>No businesses yet. Create your first workspace!</p>
+        <p>No spaces yet. Create your first space!</p>
       )}
     </section>
   );

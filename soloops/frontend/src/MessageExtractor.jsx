@@ -1,15 +1,40 @@
 
 import { useEffect, useState } from "react";
-import { API, apiFetch } from "./api";
+import { apiFetch } from "./api";
+
+const EXAMPLES = [
+  "Reminder: Scholarship renewal documents must be submitted on October 15.",
+  "I need to finish editing my TikTok video by Friday.",
+  "Maria wants to rent the camera on Saturday at 3 PM.",
+  "Schedule my dental appointment next Tuesday.",
+];
+
+const HIDDEN_KEYS = new Set([
+  "business_id",
+  "space_id",
+  "requires_confirmation",
+]);
+
+const LABELS = {
+  record_type: "Record type",
+  title: "Title",
+  person: "Person",
+  subject: "Subject",
+  due_date: "Due date",
+  due_time: "Time",
+  amount: "Amount",
+  notes: "Notes",
+};
 
 function draftFromResult(result) {
   return {
-    title: result.action_required || "Follow up on customer request",
-    customer: result.customer || "",
-    item: result.item || "",
-    due_date: result.requested_date || "",
-    due_time: result.requested_time || "",
+    title: result.title || "Follow up",
+    person: result.person || "",
+    subject: result.subject || "",
+    due_date: result.due_date || "",
+    due_time: result.due_time || "",
     amount: result.amount ?? "",
+    notes: result.notes || "",
   };
 }
 
@@ -28,10 +53,7 @@ export default function MessageExtractor() {
   useEffect(() => {
     async function loadBusinesses() {
       try {
-        const response = await fetch(`${API}/businesses`);
-        if (!response.ok) throw new Error("Failed to load businesses");
-
-        const data = await response.json();
+        const data = await apiFetch("/businesses");
         setBusinesses(data);
 
         if (data.length > 0) {
@@ -56,26 +78,13 @@ export default function MessageExtractor() {
     setSavedTask(null);
 
     try {
-      const response = await fetch(`${API}/extract/message`, {
+      const data = await apiFetch("/extract/message", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           business_id: Number(businessId),
           message: message.trim(),
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          typeof data.detail === "string"
-            ? data.detail
-            : "Extraction failed"
-        );
-      }
 
       setResult(data);
       setDraft(draftFromResult(data));
@@ -86,7 +95,7 @@ export default function MessageExtractor() {
     }
   }
 
-async function saveAsTask() {
+  async function saveAsTask() {
     if (!result || !draft || saving || savedTask) return;
 
     const title = draft.title.trim();
@@ -102,18 +111,25 @@ async function saveAsTask() {
     setSaving(true);
     setSaveError("");
 
+    const notes = [
+      draft.notes.trim(),
+      `Original text: ${message.trim()}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
     try {
       const task = await apiFetch("/tasks", {
         method: "POST",
         body: JSON.stringify({
           business_id: result.business_id,
           title,
-          customer: draft.customer.trim() || null,
-          item: draft.item.trim() || null,
+          customer: draft.person.trim() || null,
+          item: draft.subject.trim() || null,
           due_date: draft.due_date || null,
           due_time: draft.due_time || null,
           amount: draft.amount === "" ? null : Number(draft.amount),
-          notes: message.trim(),
+          notes,
         }),
       });
       setSavedTask(task);
@@ -138,14 +154,15 @@ async function saveAsTask() {
 
   return (
     <section className="extractor-page">
-      <h1>AI Message Extraction</h1>
+      <h1>AI Capture</h1>
       <p>
-        Turn customer messages into structured business information
-        using your private local AI.
+        Paste any text or message — school notices, bookings, content
+        to-dos, personal reminders. Your local AI turns it into a task
+        you review before saving.
       </p>
 
       <div className="extractor-card">
-        <label htmlFor="business-select">Select Business</label>
+        <label htmlFor="business-select">Select Space</label>
         <select
           id="business-select"
           value={businessId}
@@ -157,16 +174,16 @@ async function saveAsTask() {
           }}
         >
           {businesses.length === 0 && (
-            <option value="">Create a business first</option>
+            <option value="">Create a space first</option>
           )}
           {businesses.map((business) => (
             <option key={business.id} value={business.id}>
-              {business.name}
+              {business.name} ({business.category || "Business"})
             </option>
           ))}
         </select>
 
-        <label htmlFor="customer-message">Customer Message</label>
+        <label htmlFor="customer-message">Paste Text or Message</label>
         <textarea
           id="customer-message"
           rows={6}
@@ -178,14 +195,35 @@ async function saveAsTask() {
               setDraft(null);
             }
           }}
-          placeholder="Paste a customer message here..."
+          placeholder="e.g. Maria wants to rent the camera on Saturday at 3 PM."
         />
+
+        <div className="chip-row">
+          {EXAMPLES.map((example) => (
+            <button
+              type="button"
+              className="chip"
+              key={example}
+              onClick={() => {
+                setMessage(example);
+                if (!savedTask) {
+                  setResult(null);
+                  setDraft(null);
+                }
+              }}
+            >
+              {example}
+            </button>
+          ))}
+        </div>
 
         <button
           onClick={extractMessage}
           disabled={loading || !businessId || !message.trim()}
         >
-          {loading ? "Extracting with Local AI..." : "Extract Information"}
+          {loading
+            ? "Analyzing with Local AI..."
+            : "Analyze with Local AI"}
         </button>
 
         {error && <p className="extractor-error">{error}</p>}
@@ -197,10 +235,10 @@ async function saveAsTask() {
 
           <div className="extracted-fields">
             {Object.entries(result)
-              .filter(([key]) => key !== "business_id")
+              .filter(([key]) => !HIDDEN_KEYS.has(key))
               .map(([key, value]) => (
               <div className="extracted-field" key={key}>
-                <strong>{key.replaceAll("_", " ")}</strong>
+                <strong>{LABELS[key] || key.replaceAll("_", " ")}</strong>
                 <span>
                   {value === null
                     ? "Not provided"
@@ -231,21 +269,21 @@ async function saveAsTask() {
               />
             </label>
             <label>
-              Customer
+              Person
               <input
-                value={draft.customer}
+                value={draft.person}
                 maxLength={200}
                 disabled={!!savedTask}
-                onChange={(e) => updateDraft("customer", e.target.value)}
+                onChange={(e) => updateDraft("person", e.target.value)}
               />
             </label>
             <label>
-              Item / service
+              Item / subject
               <input
-                value={draft.item}
+                value={draft.subject}
                 maxLength={200}
                 disabled={!!savedTask}
-                onChange={(e) => updateDraft("item", e.target.value)}
+                onChange={(e) => updateDraft("subject", e.target.value)}
               />
             </label>
             <label>
@@ -277,6 +315,15 @@ async function saveAsTask() {
                 onChange={(e) => updateDraft("amount", e.target.value)}
               />
             </label>
+            <label>
+              Notes
+              <textarea
+                rows={3}
+                value={draft.notes}
+                disabled={!!savedTask}
+                onChange={(e) => updateDraft("notes", e.target.value)}
+              />
+            </label>
           </div>
 
           {saveError && (
@@ -290,7 +337,7 @@ async function saveAsTask() {
                 <strong>{savedTask.business_name}</strong>.
               </p>
               <button type="button" onClick={startOver}>
-                Process another message
+                Capture another
               </button>
             </div>
           ) : (
