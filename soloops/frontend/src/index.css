@@ -1,5 +1,21 @@
 :root {
-  font-family: Inter, Arial, sans-serif;
+  --bg: #f7f8fc;
+  --surface: #ffffff;
+  --sidebar: #ffffff;
+  --border: #e9ebf3;
+  --text: #1f2a44;
+  --muted: #6b7390;
+  --accent: #6c5ce7;
+  --accent-hover: #5a4bd6;
+  --accent-soft: #f0edff;
+  --danger: #e5484d;
+  --danger-soft: #fff1f1;
+  --warn: #f59e0b;
+  --shadow: 0 1px 2px rgba(31, 42, 68, 0.04),
+    0 8px 24px rgba(108, 92, 231, 0.06);
+  --radius: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+    Roboto, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

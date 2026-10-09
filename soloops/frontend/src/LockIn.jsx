@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
+import { spaceColor, dueText } from "./spaces";
+import { formatClock } from "./useFocusTimer";
 
-const SESSION_SECONDS = 25 * 60;
+const PRESETS = [5, 15, 25, 50];
 
-function formatClock(seconds) {
-  const m = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const s = String(seconds % 60).padStart(2, "0");
-  return `${m}:${s}`;
-}
-
-export default function LockIn({ initialTaskId }) {
+export default function LockIn({ initialTaskId, spaces = [], onChanged, timer }) {
   const [tasks, setTasks] = useState([]);
   const [taskId, setTaskId] = useState(
     initialTaskId ? String(initialTaskId) : ""
@@ -17,14 +13,26 @@ export default function LockIn({ initialTaskId }) {
   const [plan, setPlan] = useState(null);
   const [checked, setChecked] = useState([]);
   const [planning, setPlanning] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(SESSION_SECONDS);
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [completedTask, setCompletedTask] = useState(null);
+  const [customMin, setCustomMin] = useState("");
+
+  const secondsLeft = timer.remainingSec;
+  const running = timer.running;
 
   useEffect(() => {
     apiFetch("/tasks?status=pending")
       .then((data) => {
+        const today = new Date(
+          `${new Date().toLocaleDateString("en-CA")}T00:00:00`
+        );
+        data.forEach((t) => {
+          if (t.due_date && t.days_until_due == null) {
+            t.days_until_due = Math.round(
+              (new Date(`${t.due_date}T00:00:00`) - today) / 86400000
+            );
+          }
+        });
         setTasks(data);
         if (!initialTaskId && data.length > 0) {
           setTaskId(String(data[0].id));
@@ -33,19 +41,13 @@ export default function LockIn({ initialTaskId }) {
       .catch((err) => setError(err.message));
   }, [initialTaskId]);
 
+  // link the shared timer to the focused task when idle
   useEffect(() => {
-    if (!running) return undefined;
-    const timer = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          setRunning(false);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [running]);
+    if (taskId && !timer.running) {
+      timer.setTaskId(Number(taskId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
 
   const task = tasks.find((t) => String(t.id) === taskId);
 
@@ -54,8 +56,13 @@ export default function LockIn({ initialTaskId }) {
     setPlan(null);
     setChecked([]);
     setCompletedTask(null);
-    setRunning(false);
-    setSecondsLeft(SESSION_SECONDS);
+    if (!timer.running) timer.reset();
+  }
+
+  function applyCustom() {
+    const m = Number(customMin);
+    if (m >= 1) timer.setDurationMin(m);
+    setCustomMin("");
   }
 
   async function generatePlan() {
@@ -82,24 +89,22 @@ export default function LockIn({ initialTaskId }) {
     try {
       await apiFetch(`/tasks/${task.id}/complete`, { method: "PATCH" });
       setCompletedTask(task);
-      setRunning(false);
+      timer.reset();
+      timer.setTaskId(null);
       setTasks(tasks.filter((t) => t.id !== task.id));
       setTaskId("");
       setPlan(null);
+      onChanged?.();
     } catch (err) {
       setError(err.message);
     }
   }
 
   const doneCount = checked.filter(Boolean).length;
+  const elapsed = 1 - secondsLeft / timer.durationSec;
 
   return (
-    <section className="lockin-page">
-      <h1>◷ Lock In Mode</h1>
-      <p className="muted">
-        Pick one task, get a local AI plan, and focus for 25 minutes.
-      </p>
-
+    <>
       {error && <p role="alert" className="extractor-error">{error}</p>}
 
       {completedTask && (
@@ -108,10 +113,9 @@ export default function LockIn({ initialTaskId }) {
         </div>
       )}
 
-      <div className="extractor-card">
-        <label htmlFor="lockin-task">Task</label>
+      <div className="focus-select">
+        Focusing on
         <select
-          id="lockin-task"
           value={taskId}
           onChange={(e) => selectTask(e.target.value)}
         >
@@ -125,51 +129,100 @@ export default function LockIn({ initialTaskId }) {
             </option>
           ))}
         </select>
-
-        {task && (
-          <div className="lockin-task">
-            <strong>{task.title}</strong>
-            <small>
-              <span className="business-pill">
-                {task.space_category ? `${task.space_category} · ` : ""}
-                {task.business_name}
-              </span>
-              {task.customer && ` · ${task.customer}`}
-              {task.item && ` · ${task.item}`}
-              {task.due_date &&
-                ` · due ${task.due_date}${task.due_time ? " " + task.due_time : ""}`}
-            </small>
-          </div>
-        )}
       </div>
 
       {task && (
-        <div className="lockin-grid">
-          <div className="extractor-card timer-card">
+        <>
+          <div>
+            <h1 className="focus-title">{task.title}</h1>
+            <div className="focus-meta">
+              <span
+                className="nav-dot"
+                style={{
+                  background: spaceColor(task.business_id, spaces),
+                }}
+              />
+              <span>{task.business_name}</span>
+              {task.customer && ` · ${task.customer}`}
+              {task.item && ` · ${task.item}`}
+              {task.due_date && ` · ${dueText(task)}`}
+            </div>
+          </div>
+
+          <div className="card timer-card">
             <div className="timer">{formatClock(secondsLeft)}</div>
-            {secondsLeft === 0 && <p>Session complete! Take a 5-minute break.</p>}
-            <div className="business-actions">
+            <div className="progress">
+              <div style={{ width: `${elapsed * 100}%` }} />
+            </div>
+            <div className="chip-row" style={{ justifyContent: "center", margin: "0 0 10px" }}>
+              {PRESETS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={
+                    timer.durationSec === m * 60
+                      ? "chip chip-active"
+                      : "chip"
+                  }
+                  disabled={running}
+                  onClick={() => timer.setDurationMin(m)}
+                >
+                  {m}m
+                </button>
+              ))}
+              <input
+                className="control float-custom"
+                type="number"
+                min="1"
+                max="180"
+                placeholder="min"
+                value={customMin}
+                disabled={running}
+                onChange={(e) => setCustomMin(e.target.value)}
+                onBlur={applyCustom}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyCustom();
+                }}
+              />
+            </div>
+            {timer.finished && (
+              <p className="muted">Session complete! Take a 5-minute break.</p>
+            )}
+            <div className="timer-actions">
               <button
-                onClick={() => setRunning(!running)}
-                disabled={secondsLeft === 0}
+                className="btn"
+                onClick={running ? timer.pause : timer.start}
+                disabled={secondsLeft === 0 && !running}
               >
-                {running ? "Pause" : secondsLeft < SESSION_SECONDS ? "Resume" : "Start"}
+                {running
+                  ? "Pause"
+                  : secondsLeft < timer.durationSec
+                  ? "Resume"
+                  : "Start"}
               </button>
               <button
-                onClick={() => {
-                  setRunning(false);
-                  setSecondsLeft(SESSION_SECONDS);
-                }}
+                className="btn btn-secondary"
+                onClick={timer.reset}
               >
                 Reset
               </button>
             </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              Pomodoro (5/15/25/50 min or custom) · shared with the
+              floating timer
+            </p>
           </div>
 
-          <div className="extractor-card">
-            <h2>Focus Plan</h2>
+          <div className="card">
+            <div className="card-head">
+              <h3>Focus plan</h3>
+            </div>
             {!plan && (
-              <button onClick={generatePlan} disabled={planning}>
+              <button
+                className="btn btn-secondary"
+                onClick={generatePlan}
+                disabled={planning}
+              >
                 {planning ? "Planning with Local AI..." : "✦ Generate Plan"}
               </button>
             )}
@@ -192,7 +245,9 @@ export default function LockIn({ initialTaskId }) {
                           type="checkbox"
                           checked={!!checked[i]}
                           onChange={() =>
-                            setChecked(checked.map((c, j) => (j === i ? !c : c)))
+                            setChecked(
+                              checked.map((c, j) => (j === i ? !c : c))
+                            )
                           }
                         />
                         {step}
@@ -202,12 +257,17 @@ export default function LockIn({ initialTaskId }) {
                 </ul>
               </>
             )}
-            <button className="complete-button" onClick={completeTask}>
-              ✓ Mark Task Complete
-            </button>
           </div>
-        </div>
+
+          <button
+            className="complete-button"
+            style={{ width: "100%", padding: "14px" }}
+            onClick={completeTask}
+          >
+            ✓ Mark task complete
+          </button>
+        </>
       )}
-    </section>
+    </>
   );
 }
