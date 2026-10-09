@@ -65,6 +65,8 @@ def init_db():
         }
         if "due_time" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
+        if "end_time" not in task_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN end_time TEXT")
 
         conn.commit()
 
@@ -143,17 +145,18 @@ TASK_SELECT = """
 
 def create_task(
     business_id, title, customer=None, item=None,
-    due_date=None, amount=None, notes="", due_time=None
+    due_date=None, amount=None, notes="", due_time=None,
+    end_time=None
 ):
     with get_connection() as conn:
         cursor = conn.execute("""
             INSERT INTO tasks
             (business_id, title, customer, item,
-             due_date, due_time, amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             due_date, due_time, end_time, amount, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             business_id, title, customer, item,
-            due_date, due_time, amount, notes
+            due_date, due_time, end_time, amount, notes
         ))
         conn.commit()
         task_id = cursor.lastrowid

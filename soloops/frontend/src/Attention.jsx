@@ -1,37 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { apiFetch } from "./api";
+import { spaceColor, dueText } from "./spaces";
 
-function formatDue(task) {
-  if (!task.due_date) return "No due date";
-  return task.due_time ? `${task.due_date} ${task.due_time}` : task.due_date;
-}
-
-export default function Attention({ onLockIn, onData }) {
-  const [data, setData] = useState(null);
+export default function Attention({
+  data,
+  spaces,
+  spaceId,
+  onLockIn,
+  onChanged,
+  title = "Your next moves",
+}) {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [showCompleted, setShowCompleted] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const result = await apiFetch("/attention");
-      setData(result);
-      onData?.(result);
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [onData]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   async function setStatus(taskId, action) {
     setBusyId(taskId);
     try {
       await apiFetch(`/tasks/${taskId}/${action}`, { method: "PATCH" });
-      await load();
+      setError("");
+      onChanged?.();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -39,19 +27,23 @@ export default function Attention({ onLockIn, onData }) {
     }
   }
 
-  if (error && !data) {
-    return <p role="alert" className="extractor-error">{error}</p>;
-  }
-  if (!data) return <p>Loading today's attention...</p>;
+  if (!data) return <p className="muted">Loading...</p>;
 
-  const groups = data.groups.filter((g) => g.tasks.length > 0);
+  const inSpace = (t) => !spaceId || t.business_id === spaceId;
+  const groups = data.groups
+    .map((g) => ({ ...g, tasks: g.tasks.filter(inSpace) }))
+    .filter((g) => g.tasks.length > 0);
+  const completed = data.completed.filter(inSpace);
+  const pending = groups.reduce((n, g) => n + g.tasks.length, 0);
+  const overdue =
+    groups.find((g) => g.key === "overdue")?.tasks.length || 0;
 
   return (
-    <section className="attention">
-      <div className="attention-header">
-        <h2>Today's Attention</h2>
+    <div>
+      <div className="card-head">
+        <h3>{title}</h3>
         <small>
-          {data.today} (Philippine time) · {data.counts.pending} pending
+          {pending} pending{overdue ? ` · ${overdue} overdue` : ""}
         </small>
       </div>
 
@@ -68,70 +60,78 @@ export default function Attention({ onLockIn, onData }) {
           <h3 className={`bucket bucket-${group.key}`}>
             {group.label} <span>{group.tasks.length}</span>
           </h3>
-          {group.tasks.map((task) => (
-            <article key={task.id} className="task-row">
-              <div className="task-main">
-                <strong>{task.title}</strong>
-                <small>
-                  <span className="business-pill">
-                    {task.space_category ? `${task.space_category} · ` : ""}
-                    {task.business_name}
-                  </span>
-                  {task.customer && ` · ${task.customer}`}
-                  {task.item && ` · ${task.item}`}
-                  {task.amount != null && ` · ₱${task.amount}`}
-                </small>
-              </div>
-              <span className={`due due-${task.priority_bucket}`}>
-                {formatDue(task)}
-              </span>
-              <div className="task-actions">
-                <button onClick={() => onLockIn?.(task.id)}>Lock In</button>
+          {group.tasks.map((task) => {
+            const urgent =
+              group.key === "overdue" || group.key === "today";
+            return (
+              <article key={task.id} className="task-row">
                 <button
+                  className={`check-btn${urgent ? " urgent" : ""}`}
+                  title="Mark complete"
                   disabled={busyId === task.id}
                   onClick={() => setStatus(task.id, "complete")}
-                >
-                  ✓ Complete
-                </button>
-              </div>
-            </article>
-          ))}
+                />
+                {urgent && <span className="urgent-dot" />}
+                <div className="task-main">
+                  <strong>{task.title}</strong>
+                  <small>
+                    <span
+                      className="space-name"
+                      style={{ color: spaceColor(task.business_id, spaces) }}
+                    >
+                      {task.business_name}
+                    </span>
+                    {` · ${dueText(task)}`}
+                    {task.customer && ` · ${task.customer}`}
+                    {task.amount != null && ` · ₱${task.amount}`}
+                  </small>
+                </div>
+                <div className="task-actions">
+                  <button
+                    className="link-button"
+                    onClick={() => onLockIn?.(task.id)}
+                  >
+                    Lock In
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       ))}
 
-      {data.completed.length > 0 && (
+      {completed.length > 0 && (
         <div className="attention-group">
           <button
             className="link-button"
             onClick={() => setShowCompleted(!showCompleted)}
           >
-            {showCompleted ? "Hide" : "Show"} completed ({data.completed.length})
+            {showCompleted ? "Hide" : "Show"} completed ({completed.length})
           </button>
           {showCompleted &&
-            data.completed.map((task) => (
+            completed.map((task) => (
               <article key={task.id} className="task-row completed">
+                <button
+                  className="check-btn"
+                  title="Reopen"
+                  disabled={busyId === task.id}
+                  onClick={() => setStatus(task.id, "reopen")}
+                />
                 <div className="task-main">
                   <strong>{task.title}</strong>
                   <small>
-                    <span className="business-pill">
-                      {task.space_category ? `${task.space_category} · ` : ""}
+                    <span
+                      className="space-name"
+                      style={{ color: spaceColor(task.business_id, spaces) }}
+                    >
                       {task.business_name}
                     </span>
                   </small>
-                </div>
-                <span className="due">{formatDue(task)}</span>
-                <div className="task-actions">
-                  <button
-                    disabled={busyId === task.id}
-                    onClick={() => setStatus(task.id, "reopen")}
-                  >
-                    Reopen
-                  </button>
                 </div>
               </article>
             ))}
         </div>
       )}
-    </section>
+    </div>
   );
 }
