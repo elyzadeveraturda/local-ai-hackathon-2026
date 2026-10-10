@@ -226,3 +226,9 @@ node_modules/
 dist/
 
 soloops/backend/backups/
+
+# Demo recording output
+recordings/
+tools/demo-recorder/node_modules/
+.DS_Store
+.kiro/
