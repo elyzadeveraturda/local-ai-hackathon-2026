@@ -1,6 +1,7 @@
 
 import os
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(
@@ -70,13 +71,60 @@ def init_db():
         if "end_date" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN end_date TEXT")
 
+        # additive, idempotent indexes for the common lookups
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_business "
+            "ON tasks(business_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_status_due "
+            "ON tasks(status, due_date)"
+        )
+
         conn.commit()
+
+
+AUTO_BACKUP_KEEP = 20
+
+
+def backup_db(label):
+    """Snapshot the database into backups/ before a destructive change.
+
+    Keeps the newest AUTO_BACKUP_KEEP automatic snapshots; manual
+    backups (any file not starting with "auto-") are never touched.
+    """
+    backup_dir = DB_PATH.parent / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    target = backup_dir / f"auto-{stamp}-{label}.db"
+
+    with get_connection() as src:
+        dst = sqlite3.connect(target)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+
+    autos = sorted(backup_dir.glob("auto-*.db"))
+    for old in autos[:-AUTO_BACKUP_KEEP]:
+        old.unlink()
+
+    return target
 
 
 def list_businesses():
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM businesses ORDER BY id DESC"
+            """
+            SELECT businesses.*,
+                   COUNT(tasks.id) AS task_count,
+                   COALESCE(SUM(tasks.status = 'pending'), 0)
+                       AS pending_count
+            FROM businesses
+            LEFT JOIN tasks ON tasks.business_id = businesses.id
+            GROUP BY businesses.id
+            ORDER BY businesses.id DESC
+            """
         ).fetchall()
         return [dict(row) for row in rows]
 

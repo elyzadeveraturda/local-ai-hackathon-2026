@@ -252,7 +252,7 @@ function App() {
           />
         )}
         {page === "spaces" && (
-          <Businesses onCountChange={() => refresh()} />
+          <Businesses onCountChange={refresh} />
         )}
       </main>
       <FloatingTimer
