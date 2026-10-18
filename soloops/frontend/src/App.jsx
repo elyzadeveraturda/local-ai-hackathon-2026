@@ -44,7 +44,41 @@ function App() {
   const [spaces, setSpaces] = useState([]);
   const [attention, setAttention] = useState(null);
   const [aiOnline, setAiOnline] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const timer = useFocusTimer();
+
+  // keep the URL in step with the page so Back/Forward and reloads work
+  function pushUrl(nextPage, nextSpaceId) {
+    const params = new URLSearchParams();
+    params.set("page", nextPage);
+    if (nextPage === "space" && nextSpaceId != null) {
+      params.set("space", String(nextSpaceId));
+    }
+    const url = `?${params}`;
+    if (url !== window.location.search) {
+      window.history.pushState(null, "", url);
+    }
+  }
+
+  useEffect(() => {
+    function onPop() {
+      const next = initialPage();
+      setPage(next.page);
+      if (next.spaceId != null) setSpaceId(next.spaceId);
+      setNavOpen(false);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    function onKey(e) {
+      if (e.key === "Escape") setNavOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   const refresh = useCallback(() => {
     apiFetch("/businesses").then(setSpaces).catch(() => {});
@@ -76,12 +110,16 @@ function App() {
       setSpaceId(opts.spaceId ?? spaceId);
     }
     setPage(target);
+    setNavOpen(false);
+    pushUrl(target, opts.spaceId ?? spaceId);
   }
 
   function openLockIn(taskId) {
     setPrevPage(page);
     setLockInTaskId(taskId ?? null);
     setPage("focus");
+    setNavOpen(false);
+    pushUrl("focus");
   }
 
   const pendingBySpace = {};
@@ -158,7 +196,7 @@ function App() {
         <div className="focus-top">
           <button
             className="exit"
-            onClick={() => setPage(prevPage || "overview")}
+            onClick={() => navigate(prevPage || "overview")}
           >
             ← Exit focus
           </button>
@@ -180,8 +218,8 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
+    <div className={`app${navOpen ? " nav-open" : ""}`}>
+      <aside className="sidebar" id="sidebar">
         <div className="brand">
           <span className="brand-glyph">✦</span>
           SoloOps
@@ -200,8 +238,28 @@ function App() {
         </div>
       </aside>
 
+      {navOpen && (
+        <div
+          className="nav-scrim"
+          aria-hidden="true"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+
       <main className="main">
         <div className="topbar">
+          <button
+            type="button"
+            className="menu-btn"
+            aria-label={navOpen ? "Close menu" : "Open menu"}
+            aria-expanded={navOpen}
+            aria-controls="sidebar"
+            onClick={() => setNavOpen(!navOpen)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
           <span className="crumb">My workspace / {crumbName}</span>
           <span className="topbar-date">{dateLabel}</span>
         </div>
@@ -252,7 +310,7 @@ function App() {
           />
         )}
         {page === "spaces" && (
-          <Businesses onCountChange={() => refresh()} />
+          <Businesses onCountChange={refresh} />
         )}
       </main>
       <FloatingTimer

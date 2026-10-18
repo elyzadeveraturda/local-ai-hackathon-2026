@@ -76,7 +76,17 @@ export default function Businesses({ onCountChange }) {
   }
 
   useEffect(() => {
-    loadBusinesses();
+    let alive = true;
+    apiFetch("/businesses")
+      .then((data) => {
+        if (!alive) return;
+        // App already refreshes its own list on page change
+        setBusinesses(data);
+      })
+      .catch((err) => alive && setError(err.message));
+    return () => {
+      alive = false;
+    };
   }, []);
 
   function edit(business) {
@@ -135,12 +145,16 @@ export default function Businesses({ onCountChange }) {
     }
   }
 
-  async function remove(id) {
-    if (
-      !window.confirm(
-        "Delete this space? All of its tasks will also be deleted."
-      )
-    ) {
+  async function remove(business) {
+    const { id, name } = business;
+    const count = business.task_count || 0;
+    const message =
+      count > 0
+        ? `Delete "${name}" and its ${count} task${count === 1 ? "" : "s"}` +
+          ` (${business.pending_count || 0} still pending)?\n\n` +
+          "A backup of your data is saved automatically before deleting."
+        : `Delete "${name}"? It has no tasks.`;
+    if (!window.confirm(message)) {
       return;
     }
 
@@ -298,7 +312,7 @@ export default function Businesses({ onCountChange }) {
               </button>
               <button
                 className="btn btn-secondary btn-small"
-                onClick={() => remove(business.id)}
+                onClick={() => remove(business)}
                 disabled={busy}
               >
                 Delete

@@ -123,3 +123,9 @@ export function shortDate(iso) {
   const d = new Date(`${iso}T00:00:00`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+export const IMPORTANCE_OPTIONS = [
+  { value: "high", label: "High" },
+  { value: "normal", label: "Normal" },
+  { value: "low", label: "Low" },
+];

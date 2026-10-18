@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { formatClock } from "./useFocusTimer";
-
-const PRESETS = [5, 15, 25, 50];
+import { formatClock, finishedMessage } from "./useFocusTimer";
+import { ModeSwitch, PresetRow } from "./TimerControls";
 
 export default function FloatingTimer({
   timer,
@@ -14,7 +13,6 @@ export default function FloatingTimer({
       new URLSearchParams(window.location.search).get("timer") ===
         "open" || localStorage.getItem("soloops-timer-open") === "1"
   );
-  const [customMin, setCustomMin] = useState("");
   const [pipWin, setPipWin] = useState(null);
 
   const hasSession = timer.running || timer.remainingSec < timer.durationSec || timer.finished;
@@ -26,12 +24,6 @@ export default function FloatingTimer({
     } catch {
       /* ignore */
     }
-  }
-
-  function applyCustom() {
-    const m = Number(customMin);
-    if (m >= 1) timer.setDurationMin(m);
-    setCustomMin("");
   }
 
   async function popOut() {
@@ -107,6 +99,7 @@ export default function FloatingTimer({
               ))}
             </select>
           </label>
+          <ModeSwitch timer={timer} />
           <div className="float-clock">{formatClock(timer.remainingSec)}</div>
           <div className="progress">
             <div
@@ -119,39 +112,10 @@ export default function FloatingTimer({
           </div>
           {timer.finished && (
             <p className="muted" style={{ fontSize: 12.5 }}>
-              Session complete! Take a 5-minute break.
+              {finishedMessage(timer)}
             </p>
           )}
-          <div className="chip-row" style={{ margin: "8px 0" }}>
-            {PRESETS.map((m) => (
-              <button
-                key={m}
-                className={
-                  timer.durationSec === m * 60
-                    ? "chip chip-active"
-                    : "chip"
-                }
-                disabled={timer.running}
-                onClick={() => timer.setDurationMin(m)}
-              >
-                {m}m
-              </button>
-            ))}
-            <input
-              className="control float-custom"
-              type="number"
-              min="1"
-              max="180"
-              placeholder="min"
-              value={customMin}
-              disabled={timer.running}
-              onChange={(e) => setCustomMin(e.target.value)}
-              onBlur={applyCustom}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyCustom();
-              }}
-            />
-          </div>
+          <PresetRow timer={timer} style={{ margin: "8px 0" }} />
           <div className="float-actions">
             <button
               className="btn btn-small"

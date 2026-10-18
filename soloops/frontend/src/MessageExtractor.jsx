@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import DateRangeFields from "./DateRangeFields";
-import { toTaskFields, fromTaskFields } from "./spaces";
+import { toTaskFields, fromTaskFields, IMPORTANCE_OPTIONS } from "./spaces";
 
 const EXAMPLES = [
   "Reminder: Scholarship renewal documents must be submitted on October 15.",
@@ -17,6 +17,8 @@ const HIDDEN_KEYS = new Set([
   "space_auto",
   "space_reason",
   "requires_confirmation",
+  "space_source",
+  "needs_review",
 ]);
 
 const LABELS = {
@@ -32,13 +34,15 @@ const LABELS = {
 
 function draftFromResult(result) {
   return {
-    title: result.title || "Follow up",
+    // never invent a title — leave it empty so the user must write one
+    title: result.title || "",
     person: result.person || "",
     subject: result.subject || "",
     range: fromTaskFields(result),
     spaceId: result.business_id,
     amount: result.amount ?? "",
     notes: result.notes || "",
+    importance: "normal",
   };
 }
 
@@ -149,6 +153,7 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
           ...toTaskFields(draft.range),
           amount: draft.amount === "" ? null : Number(draft.amount),
           notes,
+          importance: draft.importance,
         }),
       });
       setSavedTask(task);
@@ -329,6 +334,15 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
             AI extraction may contain mistakes. Correct anything below
             before saving.
           </p>
+          {result.needs_review?.length > 0 && (
+            <ul className="review-flags">
+              {result.needs_review.map((f, i) => (
+                <li key={i} className={`review-flag ${f.level}`}>
+                  {f.level === "info" ? "ⓘ" : "⚠"} {f.message}
+                </li>
+              ))}
+            </ul>
+          )}
 
           <div className="task-form">
             <label>
@@ -375,6 +389,20 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
                 disabled={!!savedTask}
                 onChange={(e) => updateDraft("amount", e.target.value)}
               />
+            </label>
+            <label>
+              Importance
+              <select
+                value={draft.importance}
+                disabled={!!savedTask}
+                onChange={(e) => updateDraft("importance", e.target.value)}
+              >
+                {IMPORTANCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Notes

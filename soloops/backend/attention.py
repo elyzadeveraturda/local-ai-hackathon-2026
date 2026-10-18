@@ -210,6 +210,9 @@ def free_slots(tasks, day, start="08:00", end="22:00",
     return slots
 
 
+IMPORTANCE_RANK = {"high": 0, "normal": 1, "low": 2}
+
+
 def build_attention(tasks, today=None):
     today = today or ph_today()
     pending = []
@@ -230,6 +233,7 @@ def build_attention(tasks, today=None):
 
     pending.sort(key=lambda t: (
         t["priority"],
+        IMPORTANCE_RANK.get(t.get("importance") or "normal", 1),
         t.get("due_date") or "9999-12-31",
         t.get("due_time") or "99:99",
         t["id"],

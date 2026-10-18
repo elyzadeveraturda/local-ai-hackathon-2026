@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import {
   spaceColor,
@@ -11,6 +11,7 @@ import Attention from "./Attention";
 import QuickAddTask from "./QuickAddTask";
 import PlanMyDay from "./PlanMyDay";
 import RichText from "./RichText";
+import { FOCUS_LOGGED_EVENT } from "./useFocusTimer";
 
 const ASK_CHIPS = [
   "What should I prioritize today?",
@@ -48,6 +49,28 @@ export default function Overview({
   const [sources, setSources] = useState(null);
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState("");
+
+  const [focusToday, setFocusToday] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      apiFetch("/focus-sessions?days=1")
+        .then((d) => alive && setFocusToday(d.today))
+        .catch(() => {});
+    load();
+    window.addEventListener(FOCUS_LOGGED_EVENT, load);
+    return () => {
+      alive = false;
+      window.removeEventListener(FOCUS_LOGGED_EVENT, load);
+    };
+  }, []);
+
+  function scrollToMoves() {
+    document
+      .getElementById("next-moves")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const pending = attention?.tasks || [];
   const conflicts = attention?.conflicts || [];
@@ -134,10 +157,40 @@ export default function Overview({
         />
       )}
 
+      {attention && (
+        <div className="glance" aria-label="Today at a glance">
+          <button
+            className={`glance-item${attention.counts.overdue ? " danger" : ""}`}
+            onClick={scrollToMoves}
+          >
+            <span className="glance-num">{attention.counts.overdue}</span>
+            <span className="glance-label">Overdue</span>
+          </button>
+          <button className="glance-item" onClick={scrollToMoves}>
+            <span className="glance-num">{attention.counts.due_today}</span>
+            <span className="glance-label">Due today</span>
+          </button>
+          <button className="glance-item" onClick={() => onNavigate("calendar")}>
+            <span className="glance-num">{attention.counts.upcoming}</span>
+            <span className="glance-label">Next 3 days</span>
+          </button>
+          <button className="glance-item" onClick={() => onLockIn(null)}>
+            <span className="glance-num">
+              {focusToday ? focusToday.focus_minutes : "–"}
+              <small> min</small>
+            </span>
+            <span className="glance-label">Focused today</span>
+          </button>
+        </div>
+      )}
+
       <div className="space-cards">
         {[...spaces].sort((a, b) => a.id - b.id).map((space) => {
           const list = pendingFor(space.id);
           const next = soonest(list);
+          const late = list.filter(
+            (t) => t.priority_bucket === "overdue"
+          ).length;
           return (
             <button
               key={space.id}
@@ -152,7 +205,10 @@ export default function Overview({
                 <span className="arrow">↗</span>
               </div>
               <div className="space-card-count">
-                {list.length} <small>tasks</small>
+                {list.length} <small>pending</small>
+                {late > 0 && (
+                  <span className="space-card-late">{late} overdue</span>
+                )}
               </div>
               <div className="space-card-next">
                 {next
@@ -180,6 +236,7 @@ export default function Overview({
         attention={attention}
         spaces={spaces}
         onChanged={onChanged}
+        onLockIn={onLockIn}
       />
 
       {conflicts.length > 0 && (
@@ -267,7 +324,7 @@ export default function Overview({
       )}
 
       <div className="ov-grid">
-        <div className="card">
+        <div className="card" id="next-moves">
           <Attention
             data={attention}
             spaces={spaces}
@@ -376,6 +433,12 @@ export default function Overview({
               {asking ? "..." : "→"}
             </button>
           </div>
+          {asking && (
+            <p className="ai-pending" role="status">
+              <span className="spinner" aria-hidden="true" />
+              Thinking on your device…
+            </p>
+          )}
           {askError && <p className="extractor-error">{askError}</p>}
           {answer && (
             <div className="clarity-reply">

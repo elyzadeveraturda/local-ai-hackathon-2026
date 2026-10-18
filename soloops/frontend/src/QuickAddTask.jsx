@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { apiFetch } from "./api";
 import DateRangeFields from "./DateRangeFields";
-import { toTaskFields } from "./spaces";
+import { toTaskFields, IMPORTANCE_OPTIONS } from "./spaces";
 
 export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel }) {
   const [form, setForm] = useState({
     business_id: initialSpaceId ? String(initialSpaceId) : "",
     title: "",
     notes: "",
+    importance: "normal",
   });
   const [range, setRange] = useState({
     allDay: false,
@@ -38,6 +39,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
           title: form.title.trim(),
           ...toTaskFields(range),
           notes: form.notes.trim(),
+          importance: form.importance,
         }),
       });
       onSaved?.();
@@ -79,6 +81,19 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
         <div className="span-2">
           <DateRangeFields value={range} onChange={setRange} />
         </div>
+        <label>
+          Importance
+          <select
+            value={form.importance}
+            onChange={(e) => update("importance", e.target.value)}
+          >
+            {IMPORTANCE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="span-2">
           Notes
           <textarea

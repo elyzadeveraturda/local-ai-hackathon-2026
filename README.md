@@ -6,27 +6,30 @@ SoloOps AI is a private, local-first assistant for one person juggling many role
 
 ## Features
 
-- **Overview** — a calm home for the whole day: greeting, per-space cards with pending counts and next deadlines, a conflict banner when two commitments collide, "Your next moves" (all pending tasks across spaces, prioritised deterministically in Philippine time: Overdue → Due today → Due within 3 days → Later → No date), "Today's rhythm" (today's timed schedule), and an on-device assistant panel. Quick-add tasks inline.
-- **My Spaces** — organize every part of your life into spaces across 5 categories (Academic, Business, Content Creation, Personal, Custom), each with a free-text type, description and its own color. Each space gets its own page: stats, pending tasks, and a 14-day upcoming schedule. Quick-fill templates (College & Scholarship, Camera Rental, Family Property, TikTok Content, Personal Goals) prefill the form without saving.
-- **Calendar** — one week view (Mon–Sun columns) across every space: untimed "Due" chips, timed blocks in each space's color, and **conflict detection** computed deterministically from saved start/end times — overlapping commitments get a danger border and a "Two places at one time" card. Nothing is moved automatically.
+- **Overview** — a calm home for the whole day: greeting, a **Today at a glance** strip (overdue, due today, next 3 days, minutes focused today — each tile jumps to the task list, calendar or Focus mode), per-space cards with pending counts, overdue flags and next deadlines, a conflict banner when two commitments collide, "Your next moves" (all pending tasks across spaces, prioritised deterministically in Philippine time: Overdue → Due today → Due within 3 days → Later → No date, with **High/Normal/Low importance** breaking ties inside each group), "Today's rhythm" (today's timed schedule), and an on-device assistant panel. Quick-add tasks inline.
+- **My Spaces** — organize every part of your life into spaces across 5 categories (Academic, Business, Content Creation, Personal, Custom), each with a free-text type, description and its own color. Each space gets its own page: stats, pending tasks, and a 14-day upcoming schedule. Quick-fill templates (College & Scholarship, Camera Rental, Family Property, TikTok Content, Personal Goals) prefill the form without saving. Deleting a space shows how many tasks (and how many still pending) go with it, and a backup snapshot is taken first.
 - **AI Capture** — paste any text or message (school notices, booking requests, content to-dos, personal reminders); local AI extracts `record_type`, `title`, `person`, `subject`, `due_date`, `due_time`, `end_time`, `amount` and `notes`, using the selected space's name/category/type/description as context. Deterministic guards post-process the model output: relative weekday phrases ("next Tuesday", "by Friday") are resolved to real dates in code, time ranges become start/end times, hallucinated dates/amounts/people with no textual evidence are nulled, and titles are stripped of date/time fragments.
-- **Review & Save as Task** — every extracted field is editable before saving; validation, clear errors, and duplicate-save protection (UI lock + backend `409`).
+- **Review & Save as Task** — every extracted field is editable before saving. SoloOps flags what you need to confirm instead of guessing: an unresolved date, a time with no AM/PM ("at 5"), a space picked only by keywords, or a missing title (the title is left empty rather than invented). Validation, clear errors, and duplicate-save protection (UI lock + backend `409`).
 - **Ask SoloOps (Assistant)** — grounded Q&A over your saved records, scoped to **All Spaces** or a **Selected Space**. Only saved records are treated as facts: answers start with "From your saved records:" (task titles, spaces, due status) followed by clearly-labelled "Suggestions:". It can explain schedule conflicts, suggest options and draft short messages — but it never changes, moves, cancels or confirms anything. Conversations are never stored.
-- **Focus mode** — a distraction-free full-screen view: pick one task, get a context-aware focus plan from local AI (tailored to the space's category — studying, content editing, customer follow-up, errands), a Pomodoro timer (5/15/25/50 min or custom) with a progress bar, a tickable checklist, and a deterministic fallback checklist if Ollama is down.
+- **Focus mode** — a distraction-free full-screen view: pick one task, get a context-aware focus plan from local AI (tailored to the space's category — studying, content editing, customer follow-up, errands), a Pomodoro timer with **Focus and Break modes** (lengths remembered; presets or custom), start/pause/resume/reset, a progress bar, a tickable checklist, and a deterministic fallback checklist if Ollama is down. When a session ends the next mode is readied, not auto-started. Finished sessions are saved locally and shown in **Focus history** (today's sessions and minutes, last 7 days).
 
 - **Floating Pomodoro** — the same shared timer floats over every page: a small round button that becomes a live pill while running, expands into a mini timer card with presets and an optional linked task, counts down in the browser tab title, survives reloads, and can pop out into an always-on-top Picture-in-Picture window (Chrome) so it floats over other tabs and apps.
+
+- **Edit anything** — click any task (in a list or on the calendar) to open the task editor: title, space, importance, dates/times, person, subject, amount and notes; mark complete or reopen; Lock In; or delete (a backup snapshot is taken first). Changes show up everywhere at once — dashboard, space pages, calendar and AI planning.
 
 - **Whole-day & multi-day tasks** — every task form has a "Whole day" switch: date-only tasks for appointments and deadlines, multi-day spans for trips or exam weeks (shown in the calendar's all-day row across every covered day), and timed events with start/end times.
 
 - **Calendar** — a real week view with a 24-hour time grid (overlap-aware side-by-side events, all-day row, today highlight, now-line) and a month view; deterministic conflict detection flags overlapping timed tasks and computes a suggested reschedule — never applied automatically.
 
+- **Works on smaller screens** — under 900px the sidebar becomes a slide-in menu; forms switch to one column and the task editor becomes a bottom sheet on phones. Pages are in the URL, so Back/Forward and reloads keep your place.
+
 ## AI that actually works for you
 
 All AI runs on-device via Ollama (`qwen2.5:3b` on `127.0.0.1:11434`); deterministic code retrieves, validates and post-processes everything the model touches.
 
-- **Plan my day** (`POST /briefing`) — the Overview card asks local AI for a 2-sentence summary, ordered priorities and suggested time blocks. Blocks are validated in code against free slots computed from your saved timed tasks (invalid ids, out-of-slot starts and overlaps are dropped, snapped or trimmed — never trusted), and can be added to the calendar with one click. Nothing changes without your confirmation; if Ollama is down you get a deterministic basic plan.
-- **AI Capture** — extraction with auto-detected space (`space_name`/keyword fallback), plus the deterministic guards above (dates, times, people, amounts, titles).
-- **Assistant** — answers grounded only in saved SQLite records ("From your saved records:" vs "Suggestions:"), explains conflicts with computed suggestions and drafts reschedule messages; it never mutates anything.
+- **Plan my day** (`POST /briefing`) — the Overview card shows: **Needs attention** (overdue and due-today tasks, computed in code), a **Recommended order** with a one-line reason per task (the model's order is checked against your real task ids; any overdue or due-today task it skips is added back, and if the model is down SoloOps' own priority order is used), optional **step breakdowns** for big tasks (or "Break it down" on demand), suggested time blocks, and how much free time you have today. Blocks are validated in code against free slots computed from your saved timed tasks (invalid ids, out-of-slot starts and overlaps are dropped, snapped or trimmed — never trusted), and can be added to the calendar with one click. Fixed-time commitments (classes, pickups) stay in the schedule and are not reordered. Nothing changes without your confirmation.
+- **AI Capture** — extraction with auto-detected space (`space_name`/keyword fallback), the deterministic guards above (dates, times, people, amounts, titles), and `needs_review` flags for anything ambiguous.
+- **Assistant** — answers grounded only in saved SQLite records ("From your saved records:" vs "Suggestions:"), explains conflicts with computed suggestions and drafts reschedule messages; it never mutates anything. Empty questions are rejected, and timeouts, a missing model and an unreachable Ollama each get their own clear message.
 - **Lock In focus plans** — space-aware checklists generated for the task at hand, with a built-in fallback.
 
 ## Requirements
@@ -73,17 +76,41 @@ npm run dev
 
 Open http://localhost:5173. Everything binds to `127.0.0.1`/`localhost` only, so your records are not exposed on your network.
 
-The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `tasks.end_date`, `businesses.category` default `'Business'`). Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
+The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `tasks.end_date`, `businesses.category` default `'Business'`, `tasks.importance` default `'normal'`, a new `focus_sessions` table, and indexes on `tasks(business_id)` and `tasks(status, due_date)`). Nothing is dropped or rewritten; back up before upgrading anyway. Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
 
 ```bash
 cp soloops/backend/soloops.db soloops/backend/backups/soloops-$(date +%Y%m%d-%H%M%S).db
 ```
 
-## Privacy
+## Privacy and security
 
-- All AI inference runs locally via Ollama at `127.0.0.1:11434` (`qwen2.5:3b`); the FastAPI backend binds to `127.0.0.1` and the Vite dev server to `localhost`.
-- No cloud APIs, no telemetry, no external services. The frontend loads no external fonts, scripts, or assets — everything is served locally. Chat conversations are held in React state only and are never written to disk.
-- Verify offline operation yourself with the manual test below.
+- All AI inference runs locally via Ollama at `127.0.0.1:11434` (`qwen2.5:3b`). `SOLOOPS_OLLAMA_URL` can change the port, but non-local addresses are refused, because your saved records are included in prompts.
+- The FastAPI backend binds to `127.0.0.1` and only answers requests whose `Host` is `localhost`/`127.0.0.1`/`[::1]` (blocks DNS-rebinding pages). CORS only allows the local Vite origins; cross-site form and `text/plain` posts are rejected.
+- Saved records and pasted text are treated as **data, not instructions** in every prompt (chat, planning, capture, focus plans), so a task titled "ignore all rules…" can't steer the model.
+- No cloud APIs, no telemetry, no external services. The frontend loads no external fonts, scripts, or assets. Chat conversations are held in React state only and are never written to disk.
+- **Backups:** deleting a space that has tasks, or deleting a task, first writes a snapshot to `soloops/backend/backups/auto-*.db` (the newest 20 are kept; manual backups are never touched).
+- The database file is git-ignored and no longer tracked. Older commits on this repository still contain a copy of it — treat the repo history as private, or rewrite it before publishing.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SOLOOPS_DB_PATH` | `soloops/backend/soloops.db` | SQLite file to use |
+| `SOLOOPS_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama address (loopback only) |
+| `SOLOOPS_EXTRA_HOSTS` | — | Extra comma-separated `Host` names the API accepts |
+| `VITE_API_URL` | `http://127.0.0.1:8000` | Backend URL used by the frontend |
+
+### Offline verification (Oct 18, 2026)
+
+| Check | Result |
+| --- | --- |
+| Built frontend scanned for external URLs | Only SVG namespace URIs and React error-doc strings — nothing is fetched |
+| Every UI flow (plan, assistant, capture + save, calendar, spaces, focus plan) driven in a headless browser with all requests logged | Browser contacted only `localhost:5174` (Vite) and `127.0.0.1:8001` (API) |
+| Backend sockets watched during those flows | Only loopback: incoming API calls and 4 calls to Ollama on `127.0.0.1:11434` |
+| Ollama unreachable | Health shows "disconnected"; Assistant and AI Capture show "Local AI is not reachable…"; Plan my day and Focus plans fall back to rule-based output; tasks, calendar and dashboard keep working |
+| Wi-Fi physically off | **Not run in this pass** — use the manual test below to confirm on your machine |
+
+One-time setup (`pip install`, `npm install`, `ollama pull`) needs internet; running SoloOps does not.
 
 ## Tests
 
@@ -130,21 +157,27 @@ The seeder refuses to touch the real `soloops.db` (unless `--allow-main-db`) and
 ```text
 soloops/
 ├── backend/
-│   ├── main.py            # FastAPI app: spaces, extraction, tasks, /attention, /calendar, /briefing, /lock-in/plan, /chat
+│   ├── main.py            # FastAPI app: spaces, tasks (CRUD), extraction, /attention, /calendar,
+│   │                      #   /briefing, /lock-in/plan, /focus-sessions, /chat
 │   ├── attention.py       # deterministic priority + conflict logic (Asia/Manila dates)
-│   ├── database.py        # SQLite access + additive migrations
+│   ├── database.py        # SQLite access, additive migrations, auto backups
 │   ├── seed_demo.py       # demo seeder for a separate DB
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   └── tests/test_api.py
 └── frontend/src/
-    ├── App.jsx            # shell, sidebar nav, routing, focus layout
-    ├── Overview.jsx       # overview dashboard
+    ├── App.jsx            # shell, sidebar/drawer nav, URL routing, focus layout
+    ├── Overview.jsx       # dashboard (glance strip, spaces, plan, next moves, rhythm)
     ├── SpacePage.jsx      # per-space page
-    ├── CalendarPage.jsx   # week calendar + conflicts
+    ├── CalendarPage.jsx   # week/month calendar + conflicts
+    ├── TaskEditor.jsx     # edit / complete / delete dialog
     ├── QuickAddTask.jsx   # inline task form
     ├── Attention.jsx      # task lists ("Your next moves")
-    ├── LockIn.jsx         # Focus mode
+    ├── PlanMyDay.jsx      # AI day plan card
+    ├── LockIn.jsx         # Focus mode + focus history
+    ├── FloatingTimer.jsx  # floating / picture-in-picture timer
+    ├── TimerControls.jsx  # focus/break switch and presets
+    ├── useFocusTimer.js   # shared timer state, session logging
     ├── MessageExtractor.jsx  # AI Capture
     ├── AskSoloOps.jsx     # Assistant
     ├── Businesses.jsx     # Manage spaces
@@ -154,8 +187,10 @@ soloops/
 
 ## Limitations
 
-- No authentication (single local user by design).
+- No authentication (single local user by design). Any program running as you on this machine can call the local API.
+- Dates are computed in Philippine time (Asia/Manila) regardless of the computer's time zone.
 - No specialized modules (no inventory, ledger, GPA tracking) — spaces are general-purpose contexts.
 - Conflict detection needs tasks to have a start time (end times make ranges, but equal start times still count as overlaps); multi-day spans are excluded from conflict checks.
 - The assistant can explain conflicts and draft messages, but it never changes, moves or cancels anything — all edits are manual.
-- AI output quality depends on the 3B model; deterministic guards catch the common failure modes, but always review extractions.
+- AI output quality depends on the 3B model. It often skips the optional "order" and "steps" fields in Plan my day (SoloOps then uses its own order, and "Break it down" is available on demand), and focus checklists can mention tools that aren't in your notes. Deterministic guards catch the common failure modes, but always review.
+- Focus history is written when a session finishes in an open SoloOps tab, or on the next load if it finished while the app was closed. A session that ends while the backend is down is not retried.

@@ -4,7 +4,7 @@ import { spaceColor, formatRange } from "./spaces";
 
 const cacheKey = (d) => `soloops-briefing-${d}`;
 
-export default function PlanMyDay({ attention, spaces, onChanged }) {
+export default function PlanMyDay({ attention, spaces, onChanged, onLockIn }) {
   // mounted with key={today} so this lazy init is per-date
   const today = attention?.today;
   const [plan, setPlan] = useState(() => {
@@ -19,6 +19,24 @@ export default function PlanMyDay({ attention, spaces, onChanged }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [added, setAdded] = useState(() => new Set());
+  // on-demand step breakdowns via the focus planner: {taskId: {...}}
+  const [breakdowns, setBreakdowns] = useState({});
+
+  async function breakDown(taskId) {
+    setBreakdowns((b) => ({ ...b, [taskId]: { loading: true } }));
+    try {
+      const res = await apiFetch("/lock-in/plan", {
+        method: "POST",
+        body: JSON.stringify({ task_id: taskId }),
+      });
+      setBreakdowns((b) => ({
+        ...b,
+        [taskId]: { steps: res.steps, source: res.source },
+      }));
+    } catch (err) {
+      setBreakdowns((b) => ({ ...b, [taskId]: { error: err.message } }));
+    }
+  }
 
   async function generate(regen = false) {
     if (loading) return;
@@ -80,22 +98,112 @@ export default function PlanMyDay({ attention, spaces, onChanged }) {
       )}
 
       {loading && (
-        <p className="muted">Planning on your device…</p>
+        <p className="ai-pending" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Planning on your device — this can take up to a minute.
+        </p>
       )}
 
       {plan && !loading && (
         <>
           <p className="plan-summary">{plan.summary}</p>
 
-          {plan.focus?.length > 0 && (
+          {plan.urgent?.length > 0 && (
+            <div className="plan-urgent">
+              <span className="plan-urgent-label">Needs attention</span>
+              {plan.urgent.map((u) => (
+                <span
+                  key={u.task_id}
+                  className={`chip chip-${u.bucket}`}
+                  title={`${u.space_name} · ${u.due}`}
+                >
+                  {u.title} · {u.bucket === "overdue" ? "overdue" : "today"}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {plan.order?.length > 0 ? (
             <>
-              <div className="plan-sub">Focus</div>
-              <ol className="plan-focus">
-                {plan.focus.map((f, i) => (
-                  <li key={i}>{f}</li>
-                ))}
+              <div className="plan-sub">Recommended order</div>
+              <ol className="plan-order">
+                {plan.order.map((o) => {
+                  const st = plan.steps?.find((x) => x.task_id === o.task_id);
+                  const bd = breakdowns[o.task_id];
+                  return (
+                    <li key={o.task_id}>
+                      <div className="plan-order-head">
+                        <strong>{o.title}</strong>
+                        <small>
+                          <span
+                            className="nav-dot"
+                            style={{
+                              background: spaceColor(o.business_id, spaces),
+                            }}
+                          />
+                          {o.space_name} · {o.reason}
+                        </small>
+                      </div>
+                      {st && (
+                        <details className="plan-steps">
+                          <summary>Break it down ({st.steps.length} steps)</summary>
+                          <ul>
+                            {st.steps.map((x, i) => (
+                              <li key={i}>{x}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                      {!st && bd?.steps && (
+                        <ul className="plan-steps-list">
+                          {bd.steps.map((x, i) => (
+                            <li key={i}>{x}</li>
+                          ))}
+                          {bd.source !== "ai" && (
+                            <li className="muted">
+                              Local AI unavailable — basic checklist
+                            </li>
+                          )}
+                        </ul>
+                      )}
+                      {bd?.error && (
+                        <p className="extractor-error">{bd.error}</p>
+                      )}
+                      <div className="plan-order-actions">
+                        {!st && !bd?.steps && (
+                          <button
+                            className="link-button"
+                            disabled={bd?.loading}
+                            onClick={() => breakDown(o.task_id)}
+                          >
+                            {bd?.loading ? "Breaking down…" : "Break it down"}
+                          </button>
+                        )}
+                        {onLockIn && (
+                          <button
+                            className="link-button"
+                            onClick={() => onLockIn(o.task_id)}
+                          >
+                            Lock In
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             </>
+          ) : (
+            plan.focus?.length > 0 && (
+              <>
+                <div className="plan-sub">Focus</div>
+                <ol className="plan-focus">
+                  {plan.focus.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ol>
+              </>
+            )
           )}
 
           {plan.blocks?.length > 0 && (
@@ -147,7 +255,10 @@ export default function PlanMyDay({ attention, spaces, onChanged }) {
           {plan.free_slots?.length > 0 && (
             <div className="plan-slots">
               <span className="muted" style={{ fontSize: 12.5 }}>
-                Free time today:
+                Free time today
+                {plan.free_minutes > 0 &&
+                  ` (${Math.floor(plan.free_minutes / 60)}h ${plan.free_minutes % 60}m)`}
+                :
               </span>
               {plan.free_slots.map((s, i) => (
                 <span className="chip" key={i}>

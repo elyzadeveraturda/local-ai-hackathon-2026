@@ -1,6 +1,7 @@
 
 import os
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(
@@ -69,14 +70,81 @@ def init_db():
             conn.execute("ALTER TABLE tasks ADD COLUMN end_time TEXT")
         if "end_date" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN end_date TEXT")
+        if "importance" not in task_columns:
+            conn.execute(
+                "ALTER TABLE tasks "
+                "ADD COLUMN importance TEXT NOT NULL DEFAULT 'normal'"
+            )
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS focus_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER,
+                task_title TEXT,
+                kind TEXT NOT NULL DEFAULT 'focus',
+                minutes INTEGER NOT NULL,
+                completed_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id)
+                    REFERENCES tasks(id)
+                    ON DELETE SET NULL
+            )
+        """)
+
+        # additive, idempotent indexes for the common lookups
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_business "
+            "ON tasks(business_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_status_due "
+            "ON tasks(status, due_date)"
+        )
 
         conn.commit()
+
+
+AUTO_BACKUP_KEEP = 20
+
+
+def backup_db(label):
+    """Snapshot the database into backups/ before a destructive change.
+
+    Keeps the newest AUTO_BACKUP_KEEP automatic snapshots; manual
+    backups (any file not starting with "auto-") are never touched.
+    """
+    backup_dir = DB_PATH.parent / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    target = backup_dir / f"auto-{stamp}-{label}.db"
+
+    with get_connection() as src:
+        dst = sqlite3.connect(target)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+
+    autos = sorted(backup_dir.glob("auto-*.db"))
+    for old in autos[:-AUTO_BACKUP_KEEP]:
+        old.unlink()
+
+    return target
 
 
 def list_businesses():
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM businesses ORDER BY id DESC"
+            """
+            SELECT businesses.*,
+                   COUNT(tasks.id) AS task_count,
+                   COALESCE(SUM(tasks.status = 'pending'), 0)
+                       AS pending_count
+            FROM businesses
+            LEFT JOIN tasks ON tasks.business_id = businesses.id
+            GROUP BY businesses.id
+            ORDER BY businesses.id DESC
+            """
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -148,17 +216,17 @@ TASK_SELECT = """
 def create_task(
     business_id, title, customer=None, item=None,
     due_date=None, amount=None, notes="", due_time=None,
-    end_time=None, end_date=None
+    end_time=None, end_date=None, importance="normal"
 ):
     with get_connection() as conn:
         cursor = conn.execute("""
             INSERT INTO tasks
-            (business_id, title, customer, item,
-             due_date, due_time, end_time, end_date, amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (business_id, title, customer, item, due_date, due_time,
+             end_time, end_date, amount, notes, importance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            business_id, title, customer, item,
-            due_date, due_time, end_time, end_date, amount, notes
+            business_id, title, customer, item, due_date, due_time,
+            end_time, end_date, amount, notes, importance
         ))
         conn.commit()
         task_id = cursor.lastrowid
@@ -243,3 +311,69 @@ def set_task_status(task_id, status):
 
 def complete_task(task_id):
     return set_task_status(task_id, "completed")
+
+
+TASK_EDITABLE = (
+    "business_id", "title", "customer", "item", "due_date",
+    "due_time", "end_time", "end_date", "amount", "notes",
+    "importance",
+)
+
+
+def update_task(task_id, fields):
+    """Replace the editable columns given in fields (others untouched)."""
+    cols = [c for c in TASK_EDITABLE if c in fields]
+    if not cols:
+        return get_task(task_id)
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE tasks SET "
+            + ", ".join(f"{c} = ?" for c in cols)
+            + " WHERE id = ?",
+            [fields[c] for c in cols] + [task_id]
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+    return get_task(task_id) if updated else None
+
+
+def delete_task(task_id):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM tasks WHERE id = ?", (task_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def create_focus_session(task_id, task_title, kind, minutes):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO focus_sessions
+                (task_id, task_title, kind, minutes)
+            VALUES (?, ?, ?, ?)
+            """,
+            (task_id, task_title, kind, minutes)
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM focus_sessions WHERE id = ?",
+            (cursor.lastrowid,)
+        ).fetchone()
+        return dict(row)
+
+
+def list_focus_sessions(since_utc, limit=50):
+    """since_utc: 'YYYY-MM-DD HH:MM:SS' in UTC (CURRENT_TIMESTAMP form)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM focus_sessions
+            WHERE completed_at >= ?
+            ORDER BY completed_at DESC, id DESC
+            LIMIT ?
+            """,
+            (since_utc, limit)
+        ).fetchall()
+        return [dict(row) for row in rows]

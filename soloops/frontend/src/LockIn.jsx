@@ -1,9 +1,61 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import { spaceColor, dueText } from "./spaces";
-import { formatClock } from "./useFocusTimer";
+import { formatClock, finishedMessage, FOCUS_LOGGED_EVENT } from "./useFocusTimer";
+import { ModeSwitch, PresetRow } from "./TimerControls";
 
-const PRESETS = [5, 15, 25, 50];
+function FocusHistory() {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      apiFetch("/focus-sessions?days=7")
+        .then((d) => alive && setData(d))
+        .catch(() => alive && setData(null));
+    load();
+    window.addEventListener(FOCUS_LOGGED_EVENT, load);
+    return () => {
+      alive = false;
+      window.removeEventListener(FOCUS_LOGGED_EVENT, load);
+    };
+  }, []);
+
+  if (!data) return null;
+  const recent = data.sessions.filter((x) => x.kind === "focus").slice(0, 5);
+  return (
+    <div className="card focus-history">
+      <div className="card-head">
+        <h3>Focus history</h3>
+        <small>
+          Today: {data.today.focus_sessions} session
+          {data.today.focus_sessions === 1 ? "" : "s"} ·{" "}
+          {data.today.focus_minutes} min
+        </small>
+      </div>
+      {recent.length === 0 ? (
+        <p className="muted">
+          Finished focus sessions from the last 7 days appear here.
+        </p>
+      ) : (
+        <ul className="history-list">
+          {recent.map((x) => (
+            <li key={x.id}>
+              <span>{x.task_title || "Untitled session"}</span>
+              <small>
+                {x.minutes} min ·{" "}
+                {new Date(`${x.completed_at.replace(" ", "T")}Z`).toLocaleString(
+                  undefined,
+                  { weekday: "short", hour: "numeric", minute: "2-digit" }
+                )}
+              </small>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function LockIn({ initialTaskId, spaces = [], onChanged, timer }) {
   const [tasks, setTasks] = useState([]);
@@ -15,7 +67,6 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
   const [planning, setPlanning] = useState(false);
   const [error, setError] = useState("");
   const [completedTask, setCompletedTask] = useState(null);
-  const [customMin, setCustomMin] = useState("");
 
   const secondsLeft = timer.remainingSec;
   const running = timer.running;
@@ -57,12 +108,6 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
     setChecked([]);
     setCompletedTask(null);
     if (!timer.running) timer.reset();
-  }
-
-  function applyCustom() {
-    const m = Number(customMin);
-    if (m >= 1) timer.setDurationMin(m);
-    setCustomMin("");
   }
 
   async function generatePlan() {
@@ -150,43 +195,17 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
           </div>
 
           <div className="card timer-card">
+            <ModeSwitch timer={timer} />
             <div className="timer">{formatClock(secondsLeft)}</div>
             <div className="progress">
               <div style={{ width: `${elapsed * 100}%` }} />
             </div>
-            <div className="chip-row" style={{ justifyContent: "center", margin: "0 0 10px" }}>
-              {PRESETS.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={
-                    timer.durationSec === m * 60
-                      ? "chip chip-active"
-                      : "chip"
-                  }
-                  disabled={running}
-                  onClick={() => timer.setDurationMin(m)}
-                >
-                  {m}m
-                </button>
-              ))}
-              <input
-                className="control float-custom"
-                type="number"
-                min="1"
-                max="180"
-                placeholder="min"
-                value={customMin}
-                disabled={running}
-                onChange={(e) => setCustomMin(e.target.value)}
-                onBlur={applyCustom}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") applyCustom();
-                }}
-              />
-            </div>
+            <PresetRow
+              timer={timer}
+              style={{ justifyContent: "center", margin: "0 0 10px" }}
+            />
             {timer.finished && (
-              <p className="muted">Session complete! Take a 5-minute break.</p>
+              <p className="muted">{finishedMessage(timer)}</p>
             )}
             <div className="timer-actions">
               <button
@@ -208,8 +227,8 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
               </button>
             </div>
             <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-              Pomodoro (5/15/25/50 min or custom) · shared with the
-              floating timer
+              Focus and break lengths are remembered · keeps time
+              in background tabs · shared with the floating timer
             </p>
           </div>
 
@@ -268,6 +287,8 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
           </button>
         </>
       )}
+
+      <FocusHistory />
     </>
   );
 }
