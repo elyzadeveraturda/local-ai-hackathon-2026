@@ -1,6 +1,7 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from database import (
@@ -29,9 +30,11 @@ from attention import (
     ph_today,
 )
 import json
+import os
 import re
 import requests
 from typing import Optional
+from urllib.parse import urlparse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,6 +45,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SoloOps API",
     lifespan=lifespan
+)
+
+# Only answer requests addressed to this machine. Blocks DNS-rebinding
+# pages that point their own hostname at 127.0.0.1.
+LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"]
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=LOCAL_HOSTS + [
+        h.strip()
+        for h in os.environ.get("SOLOOPS_EXTRA_HOSTS", "").split(",")
+        if h.strip()
+    ],
 )
 
 app.add_middleware(
@@ -56,7 +71,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OLLAMA_URL = "http://127.0.0.1:11434"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
+
+
+def resolve_ollama_url(value):
+    """SOLOOPS_OLLAMA_URL may change the port, never leave the machine:
+    stored records are sent in prompts, so the model must be local."""
+    if not value:
+        return DEFAULT_OLLAMA_URL
+    parsed = urlparse(value.strip())
+    if (
+        parsed.scheme in ("http", "https")
+        and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    ):
+        return value.strip().rstrip("/")
+    print(
+        f"[SoloOps] Ignoring SOLOOPS_OLLAMA_URL={value!r}: only local "
+        f"addresses are allowed. Using {DEFAULT_OLLAMA_URL}."
+    )
+    return DEFAULT_OLLAMA_URL
+
+
+OLLAMA_URL = resolve_ollama_url(os.environ.get("SOLOOPS_OLLAMA_URL"))
 MODEL = "qwen2.5:3b"
 
 # Saved records and pasted text are user content, not instructions.

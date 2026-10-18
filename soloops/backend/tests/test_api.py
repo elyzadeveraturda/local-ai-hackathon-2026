@@ -26,7 +26,7 @@ def client():
     db = Path(os.environ["SOLOOPS_DB_PATH"])
     if db.exists():
         db.unlink()
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="http://127.0.0.1:8000") as c:
         yield c
 
 
@@ -92,7 +92,7 @@ def test_task_validation_and_duplicates(client):
 def test_persistence_survives_restart(client):
     bid = make_business(client)
     client.post("/tasks", json={"business_id": bid, "title": "Persist me"})
-    with TestClient(main.app) as c2:
+    with TestClient(main.app, base_url="http://127.0.0.1:8000") as c2:
         titles = [t["title"] for t in c2.get("/tasks").json()]
     assert "Persist me" in titles
 
@@ -1252,3 +1252,25 @@ def test_capture_review_flags_no_false_date_warning():
     by_field = {f["field"]: f for f in flags}
     assert by_field["due_date"]["level"] == "info"
     assert "due_time" in by_field
+
+
+def test_rejects_foreign_host_header(client):
+    assert client.get("/health", headers={"host": "evil.example"}).status_code == 400
+    assert client.get("/businesses", headers={"host": "localhost:8000"}).status_code == 200
+
+
+def test_cross_site_simple_posts_are_rejected(client):
+    bid = make_business(client)
+    body = json.dumps({"business_id": bid, "title": "csrf"})
+    for ctype in ("text/plain", "application/x-www-form-urlencoded"):
+        r = client.post("/tasks", content=body, headers={"content-type": ctype})
+        assert r.status_code == 422
+    assert client.get("/tasks").json() == []
+
+
+def test_ollama_url_must_stay_local():
+    assert main.resolve_ollama_url(None) == main.DEFAULT_OLLAMA_URL
+    assert main.resolve_ollama_url("http://localhost:11500/") == "http://localhost:11500"
+    for bad in ("https://api.example.com", "http://192.168.1.20:11434",
+                "file:///etc/passwd", "http://127.0.0.1.evil.com"):
+        assert main.resolve_ollama_url(bad) == main.DEFAULT_OLLAMA_URL
