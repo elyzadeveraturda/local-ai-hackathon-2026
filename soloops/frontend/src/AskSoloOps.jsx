@@ -187,7 +187,12 @@ export default function AskSoloOps({
               </div>
             </div>
           ))}
-          {loading && <p className="muted">Thinking...</p>}
+          {loading && (
+            <p className="ai-pending" role="status">
+              <span className="spinner" aria-hidden="true" />
+              Thinking on your device…
+            </p>
+          )}
         </div>
       )}
     </>

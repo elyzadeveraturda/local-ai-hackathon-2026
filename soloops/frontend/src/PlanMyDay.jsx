@@ -98,7 +98,10 @@ export default function PlanMyDay({ attention, spaces, onChanged, onLockIn }) {
       )}
 
       {loading && (
-        <p className="muted">Planning on your device…</p>
+        <p className="ai-pending" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Planning on your device — this can take up to a minute.
+        </p>
       )}
 
       {plan && !loading && (
