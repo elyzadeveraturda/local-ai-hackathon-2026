@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { apiFetch } from "./api";
 import { spaceColor, dueText } from "./spaces";
+import TaskEditor from "./TaskEditor";
 
 export default function Attention({
   data,
@@ -13,6 +14,7 @@ export default function Attention({
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [editing, setEditing] = useState(null);
 
   async function setStatus(taskId, action) {
     setBusyId(taskId);
@@ -72,8 +74,18 @@ export default function Attention({
                   onClick={() => setStatus(task.id, "complete")}
                 />
                 {urgent && <span className="urgent-dot" />}
-                <div className="task-main">
-                  <strong>{task.title}</strong>
+                <button
+                  type="button"
+                  className="task-main task-open"
+                  title="Edit task"
+                  onClick={() => setEditing(task)}
+                >
+                  <strong>
+                    {task.title}
+                    {task.importance === "high" && (
+                      <span className="imp-badge">High</span>
+                    )}
+                  </strong>
                   <small>
                     <span
                       className="space-name"
@@ -85,7 +97,7 @@ export default function Attention({
                     {task.customer && ` · ${task.customer}`}
                     {task.amount != null && ` · ₱${task.amount}`}
                   </small>
-                </div>
+                </button>
                 <div className="task-actions">
                   <button
                     className="link-button"
@@ -117,7 +129,12 @@ export default function Attention({
                   disabled={busyId === task.id}
                   onClick={() => setStatus(task.id, "reopen")}
                 />
-                <div className="task-main">
+                <button
+                  type="button"
+                  className="task-main task-open"
+                  title="Edit task"
+                  onClick={() => setEditing(task)}
+                >
                   <strong>{task.title}</strong>
                   <small>
                     <span
@@ -127,10 +144,21 @@ export default function Attention({
                       {task.business_name}
                     </span>
                   </small>
-                </div>
+                </button>
               </article>
             ))}
         </div>
+      )}
+
+      {editing && (
+        <TaskEditor
+          key={editing.id}
+          task={editing}
+          spaces={spaces}
+          onClose={() => setEditing(null)}
+          onChanged={onChanged}
+          onLockIn={onLockIn}
+        />
       )}
     </div>
   );

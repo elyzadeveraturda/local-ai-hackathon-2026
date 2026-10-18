@@ -1076,3 +1076,179 @@ def test_space_counts_and_backup_before_delete(client):
         assert snap.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 2
     assert client.get("/tasks").json() == []
     assert client.delete(f"/businesses/{bid}").status_code == 404
+
+
+def test_task_edit_and_delete(client):
+    a = make_business(client, name="School")
+    b = make_business(client, name="Shop")
+    tid = client.post("/tasks", json={
+        "business_id": a, "title": "Essay", "due_date": "2026-10-20",
+    }).json()["id"]
+
+    r = client.put(f"/tasks/{tid}", json={
+        "business_id": b, "title": "  Final essay ", "due_date": "2026-10-21",
+        "due_time": "09:00", "end_time": "10:00", "importance": "high",
+        "notes": "draft 2",
+    })
+    assert r.status_code == 200, r.text
+    t = r.json()
+    assert (t["title"], t["business_id"], t["business_name"]) == (
+        "Final essay", b, "Shop")
+    assert (t["due_date"], t["due_time"], t["end_time"]) == (
+        "2026-10-21", "09:00", "10:00")
+    assert t["importance"] == "high" and t["notes"] == "draft 2"
+
+    # moving the task moves it out of the old space
+    assert client.get(f"/tasks?business_id={a}").json() == []
+
+    bad = {"business_id": b, "title": "x", "due_time": "10:00",
+           "end_time": "09:00"}
+    assert client.put(f"/tasks/{tid}", json=bad).status_code == 400
+    assert client.put(f"/tasks/{tid}", json={
+        "business_id": 999, "title": "x"}).status_code == 404
+    assert client.put(f"/tasks/{tid}", json={
+        "business_id": b, "title": "x",
+        "importance": "urgent"}).status_code == 422
+    assert client.put("/tasks/999", json={
+        "business_id": b, "title": "x"}).status_code == 404
+
+    backups = database.DB_PATH.parent / "backups"
+    before = len(list(backups.glob("auto-*.db"))) if backups.exists() else 0
+    assert client.delete(f"/tasks/{tid}").status_code == 200
+    assert len(list(backups.glob("auto-*.db"))) == before + 1
+    assert client.get(f"/tasks/{tid}").status_code == 404
+    assert client.delete(f"/tasks/{tid}").status_code == 404
+
+
+def test_importance_orders_within_bucket(client):
+    bid = make_business(client)
+    today = main.ph_today().isoformat()
+    low = client.post("/tasks", json={
+        "business_id": bid, "title": "Low", "due_date": today,
+        "importance": "low"}).json()["id"]
+    normal = client.post("/tasks", json={
+        "business_id": bid, "title": "Normal", "due_date": today,
+    }).json()["id"]
+    high = client.post("/tasks", json={
+        "business_id": bid, "title": "High", "due_date": today,
+        "importance": "high"}).json()["id"]
+    ids = [t["id"] for t in client.get("/attention").json()["tasks"]]
+    assert ids == [high, normal, low]
+
+
+def test_focus_sessions_log_and_history(client):
+    bid = make_business(client)
+    tid = client.post("/tasks", json={
+        "business_id": bid, "title": "Study"}).json()["id"]
+    r = client.post("/focus-sessions", json={
+        "task_id": tid, "kind": "focus", "minutes": 25})
+    assert r.status_code == 201
+    assert r.json()["task_title"] == "Study"
+    client.post("/focus-sessions", json={"kind": "break", "minutes": 5})
+    assert client.post("/focus-sessions", json={
+        "kind": "focus", "minutes": 0}).status_code == 422
+    assert client.post("/focus-sessions", json={
+        "task_id": 999, "minutes": 5}).status_code == 404
+
+    data = client.get("/focus-sessions").json()
+    assert len(data["sessions"]) == 2
+    assert data["today"] == {"focus_sessions": 1, "focus_minutes": 25}
+
+    # deleting the task keeps the history row (task_id set null)
+    client.delete(f"/tasks/{tid}")
+    s = client.get("/focus-sessions").json()["sessions"]
+    focus = [x for x in s if x["kind"] == "focus"][0]
+    assert focus["task_id"] is None and focus["task_title"] == "Study"
+
+
+def test_briefing_order_steps_and_urgent(client):
+    bid = make_business(client)
+    today = date(2026, 10, 10)
+    overdue = client.post("/tasks", json={
+        "business_id": bid, "title": "Pay rent",
+        "due_date": "2026-10-08"}).json()["id"]
+    essay = client.post("/tasks", json={
+        "business_id": bid, "title": "Research paper",
+        "due_date": "2026-10-12", "importance": "high"}).json()["id"]
+    ai = {
+        "summary": "Pay rent first, then the research paper.",
+        "focus": ["Pay rent", "Research paper"],
+        "blocks": [],
+        # skips the overdue task and invents an id
+        "order": [
+            {"task_id": essay, "reason": "Big paper due soon, start now"},
+            {"task_id": 4242, "reason": "invented"},
+        ],
+        "steps": [
+            {"task_id": essay, "steps": [
+                "Outline sections", "Gather sources", "Draft intro"]},
+            {"task_id": 4242, "steps": ["a", "b"]},
+            {"task_id": overdue, "steps": ["only one"]},
+        ],
+    }
+    slots = [{"start": "08:00", "end": "10:00"}]
+    with patch.object(main, "ph_today", return_value=today):
+        with patch.object(main, "free_slots", return_value=slots):
+            with patch.object(
+                main.requests, "post", return_value=FakeResponse(ai)
+            ):
+                data = client.post("/briefing", json={}).json()
+
+    assert [u["task_id"] for u in data["urgent"]] == [overdue]
+    order = [(o["task_id"], o["origin"]) for o in data["order"]]
+    # AI order kept, invented id dropped, overdue appended by rule
+    assert order == [(essay, "ai"), (overdue, "rule")]
+    assert data["order"][1]["reason"].startswith("Overdue")
+    assert [s["task_id"] for s in data["steps"]] == [essay]
+    assert data["free_minutes"] == 120
+
+    # model down -> deterministic order still present
+    with patch.object(main, "ph_today", return_value=today):
+        with patch.object(main, "free_slots", return_value=slots):
+            with patch.object(
+                main.requests, "post",
+                side_effect=main.requests.ConnectionError()
+            ):
+                data = client.post("/briefing", json={}).json()
+    assert data["source"] == "fallback"
+    assert [o["task_id"] for o in data["order"]] == [overdue, essay]
+    assert data["steps"] == []
+
+
+def test_capture_review_flags():
+    flags = main.review_flags(
+        {"title": "", "due_date": None, "due_time": "05:00"},
+        "call the shop at 5", None, False)
+    fields = {f["field"] for f in flags}
+    assert {"title", "due_date", "due_time"} <= fields
+
+    flags = main.review_flags(
+        {"title": "Submit paper", "due_date": "2026-10-16",
+         "due_time": "17:00"},
+        "Submit my research paper on Friday at 5 PM.", "ai", True)
+    assert flags == []
+
+    flags = main.review_flags(
+        {"title": "Buy milk", "due_date": None, "due_time": None},
+        "buy milk", "keyword", True)
+    assert [f["field"] for f in flags] == ["due_date", "space"]
+    assert flags[0]["level"] == "info"
+
+
+def test_chat_timeout_message(client):
+    make_business(client)
+    with patch.object(
+        main.requests, "post", side_effect=main.requests.ReadTimeout()
+    ):
+        r = client.post("/chat", json={"message": "hi"})
+    assert r.status_code == 503
+    assert "too long" in r.json()["detail"]
+
+
+def test_capture_review_flags_no_false_date_warning():
+    flags = main.review_flags(
+        {"title": "Call printing shop", "due_date": None, "due_time": None},
+        "call the printing shop at 5", "ai", False)
+    by_field = {f["field"]: f for f in flags}
+    assert by_field["due_date"]["level"] == "info"
+    assert "due_time" in by_field

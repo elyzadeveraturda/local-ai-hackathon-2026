@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./api";
 import { spaceColor, formatRange, formatTime12, shortDate } from "./spaces";
 import QuickAddTask from "./QuickAddTask";
+import TaskEditor from "./TaskEditor";
 
 const HOUR_PX = 32; // full 24h ≈ 770px
 const PAD_TOP = 8;
@@ -119,6 +120,7 @@ export default function CalendarPage({
   const [cal, setCal] = useState(null);
   const [error, setError] = useState("");
   const [quickAdd, setQuickAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const bodyRef = useRef(null);
 
@@ -375,7 +377,7 @@ export default function CalendarPage({
                         (t.span_end ? " span-end" : "")
                       }
                       title={`${t.title} · ${t.business_name}`}
-                      onClick={() => onLockIn?.(t.id)}
+                      onClick={() => setEditing(t)}
                     >
                       <span
                         className="nav-dot"
@@ -464,7 +466,7 @@ export default function CalendarPage({
                         (t.status === "completed" ? " done" : "")
                       }
                       title={`${formatRange(t)} · ${t.title} · ${t.business_name}`}
-                      onClick={() => onLockIn?.(t.id)}
+                      onClick={() => setEditing(t)}
                       style={{
                         top,
                         height: hPx,
@@ -632,6 +634,17 @@ export default function CalendarPage({
 
       {view === "week" ? weekView : monthView}
       {conflictsCard}
+
+      {editing && (
+        <TaskEditor
+          key={editing.id}
+          task={editing}
+          spaces={spaces}
+          onClose={() => setEditing(null)}
+          onChanged={onChanged}
+          onLockIn={onLockIn}
+        />
+      )}
     </>
   );
 }

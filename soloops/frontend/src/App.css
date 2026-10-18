@@ -1525,9 +1525,14 @@ textarea.control {
   margin: 4px 0;
 }
 
-.float-custom {
-  width: 64px;
+/* beats input.control's width: 100% */
+input.control.float-custom {
+  width: 72px;
+  height: 32px;
   display: inline-block;
+  border-radius: 999px;
+  text-align: center;
+  padding: 0 8px;
 }
 
 .float-actions {
@@ -1983,4 +1988,269 @@ textarea {
   gap: 10px;
   margin-bottom: 22px;
   flex-wrap: wrap;
+}
+
+/* ---------- task editor modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(31, 42, 68, 0.28);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  animation: fade-in 0.15s ease;
+}
+
+.modal-card {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  animation: modal-rise 0.18s ease;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+
+.modal-close:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.modal-footer-left {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-danger-text {
+  color: var(--danger);
+}
+
+.btn-danger-text:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal-card {
+    animation: none;
+  }
+}
+
+/* task rows open the editor */
+button.task-open {
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+button.task-open:hover strong {
+  color: var(--accent);
+}
+
+button.task-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.imp-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  vertical-align: 1px;
+}
+
+/* AI Capture review flags */
+.review-flags {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.review-flag {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fff8e8;
+  color: #8a5a00;
+}
+
+.review-flag.info {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------- plan my day: urgent / order / steps ---------- */
+
+.plan-urgent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+
+.plan-urgent-label {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.plan-urgent .chip {
+  cursor: default;
+  padding: 3px 10px;
+  font-size: 12.5px;
+}
+
+.plan-urgent .chip-overdue {
+  background: var(--danger-soft);
+  border-color: #ffd5d6;
+  color: var(--danger);
+}
+
+.plan-order {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 10px;
+}
+
+.plan-order > li {
+  font-size: 14px;
+}
+
+.plan-order > li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.plan-order-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-order-head small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.plan-order .link-button {
+  font-size: 12.5px;
+  padding: 0;
+  margin-top: 2px;
+}
+
+.plan-steps {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.plan-steps summary {
+  cursor: pointer;
+  color: var(--accent);
+  width: fit-content;
+}
+
+.plan-steps ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.plan-steps li {
+  padding: 2px 0;
+}
+
+/* ---------- focus / break mode + history ---------- */
+
+.timer-mode {
+  margin: 0 auto 10px;
+  width: fit-content;
+}
+
+.float-card .timer-mode {
+  margin: 4px 0 6px;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.history-list li:last-child {
+  border-bottom: none;
+}
+
+.history-list small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.plan-order-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.plan-steps-list {
+  margin: 6px 0 2px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.plan-steps-list li {
+  padding: 2px 0;
 }

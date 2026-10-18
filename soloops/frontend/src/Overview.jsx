@@ -180,6 +180,7 @@ export default function Overview({
         attention={attention}
         spaces={spaces}
         onChanged={onChanged}
+        onLockIn={onLockIn}
       />
 
       {conflicts.length > 0 && (

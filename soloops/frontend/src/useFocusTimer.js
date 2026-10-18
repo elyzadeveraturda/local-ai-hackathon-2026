@@ -1,7 +1,66 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "./api";
 
 const KEY = "soloops-focus-timer";
+const LOG_KEY = "soloops-focus-logged";
 const BASE_TITLE = "SoloOps";
+export const FOCUS_LOGGED_EVENT = "soloops-focus-logged";
+
+export const PRESETS = {
+  focus: [15, 25, 50],
+  break: [5, 10, 15],
+};
+
+export function finishedMessage(timer) {
+  if (!timer.finished) return null;
+  return timer.finishedMode === "focus"
+    ? `Focus session complete — your ${timer.breakMin}-min break is ready.`
+    : `Break over — ready for a ${timer.focusMin}-min focus session?`;
+}
+
+const clampMin = (m, fallback) => {
+  const n = Math.round(Number(m));
+  return n >= 1 ? Math.min(180, n) : fallback;
+};
+
+// Log a finished session exactly once per endAt, even across reloads
+// or two open tabs (the endAt stamp is the dedupe key).
+function logSession({ endAt, mode, durationSec, taskId }) {
+  try {
+    if (localStorage.getItem(LOG_KEY) === String(endAt)) return;
+    localStorage.setItem(LOG_KEY, String(endAt));
+  } catch {
+    /* storage unavailable: still log once from this tab */
+  }
+  apiFetch("/focus-sessions", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: mode,
+      minutes: Math.max(1, Math.round(durationSec / 60)),
+      task_id: mode === "focus" ? taskId : null,
+    }),
+  })
+    .then(() => window.dispatchEvent(new Event(FOCUS_LOGGED_EVENT)))
+    .catch(() => {
+      /* history is optional; the timer keeps working offline */
+    });
+}
+
+// after a session ends, ready (not start) the next one
+function nextAfter(t) {
+  const mode = t.mode === "focus" ? "break" : "focus";
+  const sec = (mode === "focus" ? t.focusMin : t.breakMin) * 60;
+  return {
+    ...t,
+    mode,
+    durationSec: sec,
+    remainingSec: sec,
+    running: false,
+    endAt: null,
+    finished: true,
+    finishedMode: t.mode,
+  };
+}
 
 export function formatClock(seconds) {
   const m = String(Math.floor(seconds / 60)).padStart(2, "0");
@@ -29,18 +88,27 @@ function chime() {
 
 export function useFocusTimer() {
   const [timer, setTimer] = useState(() => {
-    const base = {
-      durationSec: 300,
-      remainingSec: 300,
+    let base = {
+      mode: "focus",
+      focusMin: 25,
+      breakMin: 5,
+      durationSec: 1500,
+      remainingSec: 1500,
       endAt: null,
       running: false,
       taskId: null,
       finished: false,
+      finishedMode: null,
+      missedEnd: null,
     };
     try {
       const saved = JSON.parse(localStorage.getItem(KEY));
       if (saved) {
-        base.durationSec = saved.durationSec || 300;
+        base.mode = saved.mode === "break" ? "break" : "focus";
+        base.focusMin = clampMin(saved.focusMin, 25);
+        base.breakMin = clampMin(saved.breakMin, 5);
+        base.durationSec = saved.durationSec || base.focusMin * 60;
+        base.remainingSec = base.durationSec;
         base.taskId = saved.taskId ?? null;
         if (saved.endAt) {
           const rem = Math.ceil((saved.endAt - Date.now()) / 1000);
@@ -49,11 +117,17 @@ export function useFocusTimer() {
             base.endAt = saved.endAt;
             base.running = true;
           } else {
-            base.remainingSec = 0;
-            base.finished = true;
+            // it ended while SoloOps was closed: log it on mount
+            base.missedEnd = {
+              endAt: saved.endAt,
+              mode: base.mode,
+              durationSec: base.durationSec,
+              taskId: base.taskId,
+            };
+            base = nextAfter(base);
           }
-        } else if (saved.remainingSec != null) {
-          base.remainingSec = saved.remainingSec;
+        } else if (saved.remainingSec > 0) {
+          base.remainingSec = Math.min(saved.remainingSec, base.durationSec);
         }
       }
     } catch {
@@ -62,23 +136,39 @@ export function useFocusTimer() {
     return base;
   });
 
+  const latest = useRef(timer);
+  useEffect(() => {
+    latest.current = timer;
+  });
+
+  useEffect(() => {
+    if (timer.missedEnd) logSession(timer.missedEnd);
+    // mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // drift-free tick from endAt; also correct after tab sleep
   useEffect(() => {
     if (!timer.running || !timer.endAt) return undefined;
     const id = setInterval(() => {
       const rem = Math.ceil((timer.endAt - Date.now()) / 1000);
       if (rem <= 0) {
-        setTimer((t) => ({
-          ...t,
-          running: false,
-          endAt: null,
-          remainingSec: 0,
-          finished: true,
-        }));
+        const t = latest.current;
+        logSession({
+          endAt: t.endAt,
+          mode: t.mode,
+          durationSec: t.durationSec,
+          taskId: t.taskId,
+        });
+        setTimer((cur) => nextAfter(cur));
         chime();
         try {
           if (Notification.permission === "granted") {
-            new Notification("Focus session complete");
+            new Notification(
+              t.mode === "focus"
+                ? "Focus session complete — time for a break"
+                : "Break over — ready to focus?"
+            );
           }
         } catch {
           /* notifications unavailable */
@@ -96,6 +186,9 @@ export function useFocusTimer() {
       localStorage.setItem(
         KEY,
         JSON.stringify({
+          mode: timer.mode,
+          focusMin: timer.focusMin,
+          breakMin: timer.breakMin,
           durationSec: timer.durationSec,
           remainingSec: timer.remainingSec,
           endAt: timer.endAt,
@@ -110,17 +203,17 @@ export function useFocusTimer() {
   // live countdown in the tab title while a session exists
   useEffect(() => {
     const active =
-      timer.running || (timer.endAt === null && false) ||
-      (!timer.finished && timer.remainingSec < timer.durationSec);
+      timer.running || timer.remainingSec < timer.durationSec;
     if (active) {
-      document.title = `${formatClock(timer.remainingSec)} · Focus · ${BASE_TITLE}`;
+      const label = timer.mode === "break" ? "Break" : "Focus";
+      document.title = `${formatClock(timer.remainingSec)} · ${label} · ${BASE_TITLE}`;
     } else {
       document.title = BASE_TITLE;
     }
     return () => {
       document.title = BASE_TITLE;
     };
-  }, [timer.running, timer.remainingSec, timer.durationSec, timer.finished, timer.endAt]);
+  }, [timer.running, timer.remainingSec, timer.durationSec, timer.mode]);
 
   const start = useCallback(() => {
     setTimer((t) => {
@@ -166,16 +259,35 @@ export function useFocusTimer() {
     }));
   }, []);
 
+  // sets the length of the current mode (focus or break) and remembers it
   const setDurationMin = useCallback((m) => {
-    const sec = Math.min(180, Math.max(1, Math.round(m))) * 60;
-    setTimer((t) => ({
-      ...t,
-      durationSec: sec,
-      remainingSec: sec,
-      running: false,
-      endAt: null,
-      finished: false,
-    }));
+    setTimer((t) => {
+      const min = clampMin(m, t.mode === "focus" ? t.focusMin : t.breakMin);
+      return {
+        ...t,
+        [t.mode === "focus" ? "focusMin" : "breakMin"]: min,
+        durationSec: min * 60,
+        remainingSec: min * 60,
+        running: false,
+        endAt: null,
+        finished: false,
+      };
+    });
+  }, []);
+
+  const setMode = useCallback((mode) => {
+    setTimer((t) => {
+      if (t.running || (mode !== "focus" && mode !== "break")) return t;
+      const sec = (mode === "focus" ? t.focusMin : t.breakMin) * 60;
+      return {
+        ...t,
+        mode,
+        durationSec: sec,
+        remainingSec: sec,
+        endAt: null,
+        finished: false,
+      };
+    });
   }, []);
 
   const setTaskId = useCallback((id) => {
@@ -188,6 +300,7 @@ export function useFocusTimer() {
     pause,
     reset,
     setDurationMin,
+    setMode,
     setTaskId,
   };
 }
