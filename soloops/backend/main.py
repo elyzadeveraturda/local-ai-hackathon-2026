@@ -1,5 +1,5 @@
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
@@ -22,6 +22,21 @@ from database import (
     delete_task,
     create_focus_session,
     list_focus_sessions,
+    find_contact_by_name,
+    create_contact,
+    get_contact,
+    get_inventory_item,
+    list_inventory,
+    list_documents,
+    document_files_for_business,
+    money_summary,
+)
+from workspace import (
+    router as workspace_router,
+    present_business,
+    encode_modules,
+    Module,
+    trash_file,
 )
 from attention import (
     build_attention,
@@ -33,7 +48,7 @@ import json
 import os
 import re
 import requests
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 @asynccontextmanager
@@ -93,6 +108,8 @@ def resolve_ollama_url(value):
 
 
 OLLAMA_URL = resolve_ollama_url(os.environ.get("SOLOOPS_OLLAMA_URL"))
+
+app.include_router(workspace_router)
 MODEL = "qwen2.5:3b"
 
 # Saved records and pasted text are user content, not instructions.
@@ -199,6 +216,11 @@ def clean_reply(reply):
     return "\n".join(out)
 
 
+PAYMENT_LABEL = {
+    "unpaid": "unpaid", "partial": "partly paid", "paid": "paid",
+}
+
+
 def describe_due(task):
     if not task.get("due_date"):
         return "no due date"
@@ -267,6 +289,12 @@ def chat(request: ChatRequest):
         f" | due: {describe_due(t)}"
         + (f" | until {t['end_time']}" if t.get("end_time") else "")
         + (f" | amount: {t['amount']:g}" if t.get("amount") is not None else "")
+        + (f" | type: {t['kind']}" if t.get("kind") not in (None, "task") else "")
+        + (
+            f" | payment: {PAYMENT_LABEL[t['payment_status']]}"
+            if t.get("payment_status") in PAYMENT_LABEL else ""
+        )
+        + (" | in progress" if t.get("status") == "in_progress" else "")
         for i, t in enumerate(selected, start=1)
     ) or "- none"
 
@@ -311,6 +339,24 @@ def chat(request: ChatRequest):
     conflicts_text = "\n".join(
         _conflict_line(c) for c in conflicts
     ) or "- none"
+
+    money = money_summary(selected_space["id"] if selected_space else None)
+    low_stock = list_inventory(
+        ph_today().isoformat(),
+        business_id=selected_space["id"] if selected_space else None,
+        low_only=True,
+    )
+    business_text = (
+        f"- Awaiting payment: {money['count']} record(s), "
+        f"{money['outstanding']:g} outstanding in total\n"
+        + (
+            "- Low stock: " + ", ".join(
+                f"{i['name']} ({i['quantity']} left, {i['business_name']})"
+                for i in low_stock[:8]
+            )
+            if low_stock else "- Low stock: none"
+        )
+    )
 
     scope_line = (
         f"Scope: only the space '{selected_space['name']}'"
@@ -378,6 +424,9 @@ Pending tasks, numbered in priority order (1 = most urgent):
 
 Recently completed tasks:
 {completed_text}
+
+Money and stock (computed by SoloOps from saved records):
+{business_text}
 
 Schedule conflicts detected by SoloOps (computed from saved
 start/end times, not guesses):
@@ -449,11 +498,13 @@ class BusinessInput(BaseModel):
         "Custom",
     ] = "Business"
     description: str = Field(default="", max_length=1000)
+    # which tabs the space shows; None keeps the category defaults
+    modules: Optional[List[Module]] = None
 
 
 @app.get("/businesses")
 def get_all_businesses():
-    return list_businesses()
+    return [present_business(b) for b in list_businesses()]
 
 
 @app.get("/businesses/{business_id}")
@@ -466,17 +517,18 @@ def get_one_business(business_id: int):
             detail="Space not found"
         )
 
-    return business
+    return present_business(business)
 
 
 @app.post("/businesses", status_code=201)
 def add_business(data: BusinessInput):
-    return create_business(
+    return present_business(create_business(
         data.name.strip(),
         data.business_type.strip(),
         data.description.strip(),
-        data.category
-    )
+        data.category,
+        encode_modules(data.modules, data.category),
+    ))
 
 
 @app.put("/businesses/{business_id}")
@@ -484,12 +536,20 @@ def edit_business(
     business_id: int,
     data: BusinessInput
 ):
+    current = get_business(business_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Space not found")
+    modules = (
+        encode_modules(data.modules, data.category)
+        if data.modules is not None else current.get("modules")
+    )
     business = update_business(
         business_id,
         data.name.strip(),
         data.business_type.strip(),
         data.description.strip(),
-        data.category
+        data.category,
+        modules,
     )
 
     if not business:
@@ -498,7 +558,7 @@ def edit_business(
             detail="Space not found"
         )
 
-    return business
+    return present_business(business)
 
 
 @app.delete("/businesses/{business_id}")
@@ -510,12 +570,20 @@ def remove_business(business_id: int):
             detail="Space not found"
         )
 
-    # deleting a space cascades to its tasks, so snapshot first
-    has_tasks = list_tasks(business_id=business_id)
-    if has_tasks:
+    # deleting a space cascades to its records, items and documents,
+    # so snapshot first
+    files = document_files_for_business(business_id)
+    has_data = (
+        list_tasks(business_id=business_id)
+        or list_inventory(ph_today().isoformat(), business_id=business_id)
+        or list_documents(business_id=business_id)
+    )
+    if has_data:
         backup_db(f"before-delete-space-{business_id}")
 
     deleted = delete_business(business_id)
+    for stored in files:
+        trash_file(stored)
 
     if not deleted:
         raise HTTPException(
@@ -639,6 +707,55 @@ EXPLICIT_DATE_RE = re.compile(
     r"|\b\d{1,2}[/-]\d{1,2}\b|\d{4}-\d{2}-\d{2}",
     re.IGNORECASE,
 )
+
+KIND_FROM_TYPE = (
+    ("booking", ("booking", "rental", "rent", "reservation", "reserve")),
+    ("payment", ("payment", "invoice", "bill", "receipt", "deposit")),
+    ("event", ("appointment", "event", "meeting", "class", "schedule")),
+    ("deadline", ("deadline", "due", "submission")),
+)
+
+
+def kind_for(record_type):
+    text = str(record_type or "").lower()
+    for kind, words in KIND_FROM_TYPE:
+        if any(w in text for w in words):
+            return kind
+    return "task"
+
+
+def link_capture(result, business):
+    """Suggest a record type, customer and inventory item for a capture.
+    Only links to things that already exist; a new customer is just
+    flagged so the review form can say it will be added."""
+    result["kind"] = kind_for(result.get("record_type"))
+
+    person = result.get("person")
+    result["contact_id"] = find_contact_by_name(person) if person else None
+    result["contact_is_new"] = bool(person) and result["contact_id"] is None
+
+    result["inventory_id"] = None
+    subject = (result.get("subject") or "").strip().lower()
+    if subject:
+        best = None
+        for inv in list_inventory(
+            ph_today().isoformat(), business_id=business["id"]
+        ):
+            name = inv["name"].strip().lower()
+            if name and (name in subject or subject in name):
+                if best is None or len(name) > len(best["name"]):
+                    best = inv
+        if best:
+            result["inventory_id"] = best["id"]
+
+    result["payment_status"] = (
+        "unpaid"
+        if result.get("amount") is not None
+        and result["kind"] in ("booking", "payment")
+        else None
+    )
+    return result
+
 
 BARE_HOUR_RE = re.compile(
     r"\b(?:at|by|around)\s+(\d{1,2})(?::\d{2})?\b"
@@ -891,7 +1008,7 @@ Rules:
 2. All values must be strings, numbers, booleans, or null.
 3. Never return nested objects or arrays.
 4. record_type describes the record, e.g. deadline, task,
-   booking_request, appointment, payment, reminder,
+   booking_request, appointment, event, payment, reminder,
    content_task, or inquiry.
 5. title is a short imperative action of at most 8 words
    (e.g. "Submit scholarship renewal documents"). It must NOT
@@ -1051,6 +1168,7 @@ Text (resolve any weekday words with the lookup table):
         result["space_source"] = space_source
         result["space_reason"] = space_reason
         result["requires_confirmation"] = True
+        link_capture(result, business)
         result["needs_review"] = review_flags(
             result, data.message, space_source, auto_space
         )
@@ -1062,6 +1180,11 @@ Text (resolve any weekday words with the lookup table):
             status_code=503,
             detail=ai_error_detail(exc)
         )
+
+
+RecordKind = Literal["task", "event", "booking", "payment", "deadline"]
+RecordStatus = Literal["pending", "in_progress", "completed"]
+PaymentStatus = Literal["unpaid", "partial", "paid"]
 
 
 class TaskInput(BaseModel):
@@ -1080,6 +1203,19 @@ class TaskInput(BaseModel):
     amount: Optional[float] = Field(default=None, ge=0)
     notes: str = Field(default="", max_length=5000)
     importance: Literal["high", "normal", "low"] = "normal"
+    kind: RecordKind = "task"
+    status: RecordStatus = "pending"
+    payment_status: Optional[PaymentStatus] = None
+    amount_paid: Optional[float] = Field(default=None, ge=0)
+    contact_id: Optional[int] = None
+    # typed customer name: linked to an existing customer with the same
+    # name, or added as a new customer
+    contact_name: Optional[str] = Field(default=None, max_length=120)
+    inventory_id: Optional[int] = None
+
+
+class StatusInput(BaseModel):
+    status: RecordStatus
 
 
 class ScheduleInput(BaseModel):
@@ -1133,60 +1269,12 @@ def clean_optional(value):
     return value or None
 
 
-@app.post("/tasks", status_code=201)
-def add_task(data: TaskInput):
-    if not get_business(data.business_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Business not found"
-        )
+def record_fields(data):
+    """Validate a TaskInput and turn it into column values.
 
-    title = data.title.strip()
-    if not title:
-        raise HTTPException(
-            status_code=400,
-            detail="Task title cannot be empty"
-        )
-
-    end_date = validate_schedule(
-        data.due_date, data.due_time, data.end_time, data.end_date
-    )
-
-    customer = clean_optional(data.customer)
-    due_date = data.due_date.isoformat() if data.due_date else None
-    notes = data.notes.strip()
-
-    duplicate_id = find_duplicate_task(
-        data.business_id, title, customer, due_date, notes
-    )
-    if duplicate_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "An identical pending task already exists "
-                f"(task #{duplicate_id})."
-            )
-        )
-
-    return create_task(
-        business_id=data.business_id,
-        title=title,
-        customer=customer,
-        item=clean_optional(data.item),
-        due_date=due_date,
-        due_time=data.due_time or None,
-        end_time=data.end_time or None,
-        end_date=end_date.isoformat() if end_date else None,
-        amount=data.amount,
-        notes=notes,
-        importance=data.importance,
-    )
-
-
-@app.put("/tasks/{task_id}")
-def edit_task(task_id: int, data: TaskInput):
-    if not get_task(task_id):
-        raise HTTPException(status_code=404, detail="Task not found")
+    Resolves the customer link (existing id, matching name, or a new
+    customer), checks the inventory item belongs to the same space and
+    keeps payment fields consistent."""
     if not get_business(data.business_id):
         raise HTTPException(status_code=404, detail="Space not found")
 
@@ -1194,18 +1282,73 @@ def edit_task(task_id: int, data: TaskInput):
     if not title:
         raise HTTPException(
             status_code=400,
-            detail="Task title cannot be empty"
+            detail="Title cannot be empty"
         )
 
     end_date = validate_schedule(
         data.due_date, data.due_time, data.end_time, data.end_date
     )
 
-    return update_task(task_id, {
+    # customer: id wins, then typed name, then legacy free text
+    contact_id = data.contact_id
+    customer = clean_optional(data.customer)
+    typed = clean_optional(data.contact_name)
+    if contact_id is not None:
+        contact = get_contact(contact_id)
+        if not contact:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        customer = contact["name"]
+    elif typed:
+        contact_id = find_contact_by_name(typed)
+        if contact_id is None:
+            contact_id = create_contact({
+                "name": typed, "business_id": data.business_id,
+                "notes": "",
+            })["id"]
+        customer = get_contact(contact_id)["name"]
+    elif data.contact_name is not None:
+        customer = None  # name explicitly cleared
+
+    item = clean_optional(data.item)
+    if data.inventory_id is not None:
+        inv = get_inventory_item(data.inventory_id, ph_today().isoformat())
+        if not inv:
+            raise HTTPException(status_code=404, detail="Item not found")
+        if inv["business_id"] != data.business_id:
+            raise HTTPException(
+                status_code=400,
+                detail="That item belongs to a different space",
+            )
+        item = inv["name"]
+
+    payment_status = data.payment_status
+    amount_paid = data.amount_paid
+    if payment_status and data.amount is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Add an amount to track payment"
+        )
+    if payment_status == "paid":
+        amount_paid = data.amount
+    elif payment_status == "unpaid":
+        amount_paid = None
+    elif payment_status == "partial":
+        if amount_paid is None or amount_paid <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Enter how much has been paid so far"
+            )
+        if amount_paid >= data.amount:
+            payment_status = "paid"
+            amount_paid = data.amount
+    else:
+        amount_paid = None
+
+    return {
         "business_id": data.business_id,
         "title": title,
-        "customer": clean_optional(data.customer),
-        "item": clean_optional(data.item),
+        "customer": customer,
+        "item": item,
         "due_date": data.due_date.isoformat() if data.due_date else None,
         "due_time": data.due_time or None,
         "end_time": data.end_time or None,
@@ -1213,7 +1356,102 @@ def edit_task(task_id: int, data: TaskInput):
         "amount": data.amount,
         "notes": data.notes.strip(),
         "importance": data.importance,
-    })
+        "kind": data.kind,
+        "status": data.status,
+        "payment_status": payment_status,
+        "amount_paid": amount_paid,
+        "contact_id": contact_id,
+        "inventory_id": data.inventory_id,
+    }
+
+
+def _span(task):
+    """(start, end) strings for a dated record, for overlap checks."""
+    start_day = task["due_date"]
+    end_day = task.get("end_date") or start_day
+    start = f"{start_day} {task.get('due_time') or '00:00'}"
+    if task.get("end_time"):
+        end = f"{end_day} {task['end_time']}"
+    else:
+        end = f"{end_day} 23:59"
+    return start, end
+
+
+def annotate_availability(tasks):
+    """Flag open bookings whose item is booked more times than it is
+    in stock at overlapping times. Adds availability_warning (or None)."""
+    bookings = [
+        t for t in list_tasks(kind="booking", status="open")
+        if t.get("inventory_id") and t.get("due_date")
+    ]
+    if not bookings:
+        for t in tasks:
+            t["availability_warning"] = None
+        return tasks
+    stock = {
+        i["id"]: i["quantity"]
+        for i in list_inventory(ph_today().isoformat())
+    }
+    by_item = {}
+    for b in bookings:
+        by_item.setdefault(b["inventory_id"], []).append(b)
+
+    for t in tasks:
+        t["availability_warning"] = None
+        if (
+            t.get("kind") != "booking" or t.get("status") == "completed"
+            or not t.get("inventory_id") or not t.get("due_date")
+        ):
+            continue
+        s1, e1 = _span(t)
+        others = [
+            b for b in by_item.get(t["inventory_id"], [])
+            if b["id"] != t["id"] and _span(b)[0] < e1 and s1 < _span(b)[1]
+        ]
+        available = stock.get(t["inventory_id"], 0)
+        if len(others) + 1 > available:
+            names = ", ".join(f'"{b["title"]}"' for b in others[:2]) or "nothing else"
+            t["availability_warning"] = (
+                f"Only {available} {t.get('inventory_name') or 'item'} "
+                f"available — also booked for {names} at that time."
+                if others else
+                f"{t.get('inventory_name') or 'This item'} is out of stock."
+            )
+    return tasks
+
+
+@app.post("/tasks", status_code=201)
+def add_task(data: TaskInput):
+    fields = record_fields(data)
+
+    duplicate_id = find_duplicate_task(
+        fields["business_id"], fields["title"], fields["customer"],
+        fields["due_date"], fields["notes"]
+    )
+    if duplicate_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An identical open record already exists "
+                f"(#{duplicate_id})."
+            )
+        )
+
+    return annotate_availability([create_task(**fields)])[0]
+
+
+@app.put("/tasks/{task_id}")
+def edit_task(task_id: int, data: TaskInput):
+    if not get_task(task_id):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return annotate_availability([update_task(task_id, record_fields(data))])[0]
+
+
+@app.patch("/tasks/{task_id}/status")
+def change_task_status(task_id: int, data: StatusInput):
+    if not set_task_status(task_id, data.status):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return get_task(task_id)
 
 
 @app.delete("/tasks/{task_id}")
@@ -1270,10 +1508,40 @@ def focus_sessions(days: int = 7):
 
 @app.get("/tasks")
 def get_tasks(
-    status: Optional[str] = None,
-    business_id: Optional[int] = None
+    status: Optional[Literal[
+        "pending", "in_progress", "completed", "open"
+    ]] = None,
+    business_id: Optional[int] = None,
+    kind: Optional[RecordKind] = None,
+    payment: Optional[Literal[
+        "open", "unpaid", "partial", "paid", "tracked"
+    ]] = None,
+    contact_id: Optional[int] = None,
+    inventory_id: Optional[int] = None,
+    q: Optional[str] = Query(default=None, max_length=100),
+    sort: Literal[
+        "due", "created", "updated", "title", "amount", "balance"
+    ] = "due",
+    direction: Literal["asc", "desc"] = "asc",
 ):
-    return list_tasks(status=status, business_id=business_id)
+    tasks = list_tasks(
+        status=status, business_id=business_id, kind=kind,
+        payment=payment, contact_id=contact_id,
+        inventory_id=inventory_id, q=clean_optional(q), sort=sort,
+        direction=direction,
+    )
+    today = ph_today()
+    for t in tasks:
+        if t.get("due_date"):
+            try:
+                t["days_until_due"] = (
+                    date.fromisoformat(t["due_date"]) - today
+                ).days
+            except ValueError:
+                t["days_until_due"] = None
+        else:
+            t["days_until_due"] = None
+    return annotate_availability(tasks)
 
 
 @app.get("/tasks/{task_id}")
@@ -1281,7 +1549,7 @@ def get_one_task(task_id: int):
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return annotate_availability([task])[0]
 
 
 @app.patch("/tasks/{task_id}/schedule")

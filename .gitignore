@@ -226,6 +226,8 @@ node_modules/
 dist/
 
 soloops/backend/backups/
+# documents attached in the app (local files)
+soloops/backend/files/
 
 # Demo recording output
 recordings/

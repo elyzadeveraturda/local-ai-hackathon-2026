@@ -1274,3 +1274,314 @@ def test_ollama_url_must_stay_local():
     for bad in ("https://api.example.com", "http://192.168.1.20:11434",
                 "file:///etc/passwd", "http://127.0.0.1.evil.com"):
         assert main.resolve_ollama_url(bad) == main.DEFAULT_OLLAMA_URL
+
+
+# ---------- business workspace ----------
+
+def test_space_modules_defaults_and_custom(client):
+    shop = client.post("/businesses", json={
+        "name": "Lens Rental", "business_type": "Camera rental",
+        "category": "Business"}).json()
+    assert shop["modules"] == [
+        "work", "payments", "customers", "inventory", "documents"]
+    school = client.post("/businesses", json={
+        "name": "School", "business_type": "College",
+        "category": "Academic"}).json()
+    assert school["modules"] == ["work", "documents"]
+
+    # customise: unknown modules rejected, "work" always kept, order fixed
+    r = client.put(f"/businesses/{school['id']}", json={
+        "name": "School", "business_type": "College", "category": "Academic",
+        "modules": ["documents", "customers"]})
+    assert r.json()["modules"] == ["work", "customers", "documents"]
+    assert client.put(f"/businesses/{school['id']}", json={
+        "name": "School", "business_type": "College",
+        "modules": ["spaceship"]}).status_code == 422
+    # editing without modules keeps the customisation
+    r = client.put(f"/businesses/{school['id']}", json={
+        "name": "School 2", "business_type": "College", "category": "Academic"})
+    assert r.json()["modules"] == ["work", "customers", "documents"]
+
+
+def test_booking_links_customer_item_and_payment(client):
+    bid = make_business(client, name="Lens Rental")
+    other = make_business(client, name="Other")
+    cam = client.post("/inventory", json={
+        "business_id": bid, "name": "Canon R6", "quantity": 1,
+        "reorder_at": 0, "price": 1500}).json()
+
+    r = client.post("/tasks", json={
+        "business_id": bid, "title": "Rent Canon R6", "kind": "booking",
+        "contact_name": "Maria Santos", "inventory_id": cam["id"],
+        "due_date": "2026-11-07", "amount": 3000,
+        "payment_status": "partial", "amount_paid": 1000,
+    })
+    assert r.status_code == 201, r.text
+    rec = r.json()
+    assert rec["kind"] == "booking" and rec["status"] == "pending"
+    assert rec["contact_name"] == "Maria Santos" == rec["customer"]
+    assert rec["inventory_name"] == "Canon R6" == rec["item"]
+    assert rec["payment_status"] == "partial" and rec["amount_paid"] == 1000
+    assert rec["availability_warning"] is None
+
+    # same typed name reuses the customer
+    r2 = client.post("/tasks", json={
+        "business_id": bid, "title": "Second rental", "kind": "booking",
+        "contact_name": "maria santos ", "inventory_id": cam["id"],
+        "due_date": "2026-11-07", "amount": 500, "payment_status": "unpaid",
+    }).json()
+    assert r2["contact_id"] == rec["contact_id"]
+    # only one camera: both bookings on the same day are flagged
+    assert "also booked" in r2["availability_warning"]
+    flagged = client.get(f"/tasks/{rec['id']}").json()["availability_warning"]
+    assert "Second rental" in flagged
+
+    contacts = client.get("/contacts").json()
+    assert len(contacts) == 1
+    assert contacts[0]["record_count"] == 2
+    assert contacts[0]["balance_due"] == 2500  # 2000 + 500
+
+    # payment rules
+    bad = {"business_id": bid, "title": "x", "payment_status": "unpaid"}
+    assert client.post("/tasks", json=bad).status_code == 400
+    bad = {"business_id": bid, "title": "y", "amount": 100,
+           "payment_status": "partial"}
+    assert client.post("/tasks", json=bad).status_code == 400
+    over = client.post("/tasks", json={
+        "business_id": bid, "title": "z", "amount": 100,
+        "payment_status": "partial", "amount_paid": 150}).json()
+    assert over["payment_status"] == "paid" and over["amount_paid"] == 100
+    # item must belong to the same space
+    assert client.post("/tasks", json={
+        "business_id": other, "title": "w",
+        "inventory_id": cam["id"]}).status_code == 400
+
+    summary = client.get("/summary").json()
+    assert summary["money"] == {"count": 2, "outstanding": 2500}
+    assert summary["low_stock"] == []  # 1 in stock, reorder at 0
+    item = client.patch(f"/inventory/{cam['id']}/adjust", json={"delta": -5}).json()
+    assert item["quantity"] == 0  # never below zero
+    low = client.get("/summary").json()["low_stock"]
+    assert [i["name"] for i in low] == ["Canon R6"]
+    # with none in stock the bookings are still flagged
+    assert client.get(f"/tasks/{rec['id']}").json()[
+        "availability_warning"].startswith("Only 0 Canon R6")
+    client.patch(f"/tasks/{r2['id']}/complete")
+    lone = client.get(f"/tasks/{rec['id']}").json()["availability_warning"]
+    assert lone == "Canon R6 is out of stock."
+
+
+def test_record_filters_sort_and_status(client):
+    a = make_business(client, name="A")
+    b = make_business(client, name="B")
+    t1 = client.post("/tasks", json={"business_id": a, "title": "Edit video",
+                                     "due_date": "2026-11-02"}).json()
+    t2 = client.post("/tasks", json={"business_id": a, "title": "Invoice 50% off",
+                                     "kind": "payment", "amount": 900,
+                                     "payment_status": "unpaid"}).json()
+    t3 = client.post("/tasks", json={"business_id": b, "title": "Dentist",
+                                     "kind": "event", "due_date": "2026-11-01"}).json()
+
+    r = client.patch(f"/tasks/{t1['id']}/status", json={"status": "in_progress"})
+    assert r.json()["status"] == "in_progress"
+    assert client.patch(f"/tasks/{t1['id']}/status",
+                        json={"status": "archived"}).status_code == 422
+
+    ids = lambda q: [t["id"] for t in client.get(f"/tasks?{q}").json()]
+    assert ids("status=in_progress") == [t1["id"]]
+    assert set(ids("status=open")) == {t1["id"], t2["id"], t3["id"]}
+    assert ids("kind=payment") == [t2["id"]]
+    assert ids("payment=open") == [t2["id"]]
+    assert ids(f"business_id={b}") == [t3["id"]]
+    # literal % in search is not a wildcard
+    assert ids("q=50%25") == [t2["id"]]
+    assert ids("q=video") == [t1["id"]]
+    assert ids("sort=title") == [t3["id"], t1["id"], t2["id"]]
+    assert ids("sort=due")[:2] == [t3["id"], t1["id"]]
+    assert client.get("/tasks?sort=nope").status_code == 422
+
+    # in-progress work still counts as open on the dashboard
+    att = client.get("/attention").json()
+    assert t1["id"] in [t["id"] for t in att["tasks"]]
+    spaces = {s["id"]: s for s in client.get("/businesses").json()}
+    assert spaces[a]["pending_count"] == 2
+
+
+def test_customers_crud_and_rename_syncs_records(client):
+    bid = make_business(client)
+    c = client.post("/contacts", json={"name": "Ana Cruz", "phone": "0917",
+                                       "email": "ana@example.com",
+                                       "business_id": bid}).json()
+    t = client.post("/tasks", json={"business_id": bid, "title": "Cake order",
+                                    "contact_id": c["id"]}).json()
+    assert t["customer"] == "Ana Cruz"
+    assert client.post("/contacts", json={"name": "X",
+                                          "email": "nope"}).status_code == 400
+    client.put(f"/contacts/{c['id']}", json={"name": "Ana C. Cruz",
+                                             "business_id": bid})
+    assert client.get(f"/tasks/{t['id']}").json()["customer"] == "Ana C. Cruz"
+    assert [x["id"] for x in client.get(f"/contacts?business_id={bid}").json()] == [c["id"]]
+    assert client.get("/contacts?q=cruz").json()[0]["id"] == c["id"]
+
+    assert client.delete(f"/contacts/{c['id']}").status_code == 200
+    kept = client.get(f"/tasks/{t['id']}").json()
+    assert kept["contact_id"] is None and kept["customer"] == "Ana C. Cruz"
+
+
+def test_inventory_crud_and_validation(client):
+    bid = make_business(client)
+    item = client.post("/inventory", json={"business_id": bid, "name": "Flour",
+                                           "quantity": 10, "unit": "kg",
+                                           "reorder_at": 3}).json()
+    assert item["quantity"] == 10 and item["business_name"] == "Bake Shop"
+    assert client.post("/inventory", json={"business_id": bid, "name": "x",
+                                           "quantity": -1}).status_code == 422
+    assert client.post("/inventory", json={"business_id": 999,
+                                           "name": "x"}).status_code == 404
+    client.patch(f"/inventory/{item['id']}/adjust", json={"delta": -8})
+    assert client.get("/inventory?low=true").json()[0]["quantity"] == 2
+    r = client.put(f"/inventory/{item['id']}", json={"business_id": bid,
+                                                     "name": "Bread flour",
+                                                     "quantity": 20})
+    assert r.json()["name"] == "Bread flour" and r.json()["reorder_at"] is None
+    assert client.delete(f"/inventory/{item['id']}").status_code == 200
+    assert client.get(f"/inventory/{item['id']}").status_code == 404
+
+
+def test_documents_with_files(client):
+    import base64
+    bid = make_business(client)
+    other = make_business(client, name="Other")
+    tid = client.post("/tasks", json={"business_id": bid,
+                                      "title": "Lease"}).json()["id"]
+    content = base64.b64encode(b"%PDF-1.4 hello").decode()
+    d = client.post("/documents", json={
+        "business_id": bid, "title": "Signed lease", "body": "Unit 2",
+        "task_id": tid, "file_name": "lease.pdf", "file_content": content,
+    })
+    assert d.status_code == 201, d.text
+    doc = d.json()
+    assert doc["file_name"] == "lease.pdf" and doc["file_size"] == 14
+    assert doc["task_title"] == "Lease"
+    assert client.get(f"/tasks/{tid}").json()["document_count"] == 1
+
+    f = client.get(f"/documents/{doc['id']}/file")
+    assert f.status_code == 200 and f.content == b"%PDF-1.4 hello"
+    assert f.headers["content-type"] == "application/pdf"
+    assert "sandbox" in f.headers["content-security-policy"]
+
+    # risky types are always downloaded, never rendered
+    html = client.post("/documents", json={
+        "business_id": bid, "title": "page", "file_name": "x.html",
+        "file_content": base64.b64encode(b"<script>1</script>").decode(),
+    }).json()
+    h = client.get(f"/documents/{html['id']}/file")
+    assert h.headers["content-type"] == "application/octet-stream"
+    assert h.headers["content-disposition"].startswith("attachment")
+
+    assert client.post("/documents", json={
+        "business_id": bid, "title": "bad", "file_name": "a.txt",
+        "file_content": "not base64!!"}).status_code == 400
+    assert client.post("/documents", json={
+        "business_id": other, "title": "wrong space",
+        "task_id": tid}).status_code == 400
+
+    # replace the file, then remove it; old files go to trash, not deleted
+    import workspace
+    first = doc["file_path"]
+    client.put(f"/documents/{doc['id']}", json={
+        "business_id": bid, "title": "Signed lease", "task_id": tid, "file_name": "v2.pdf",
+        "file_content": base64.b64encode(b"%PDF v2").decode()})
+    assert (workspace.TRASH_DIR / first).is_file()
+    r = client.put(f"/documents/{doc['id']}", json={
+        "business_id": bid, "title": "Signed lease", "task_id": tid, "remove_file": True})
+    assert r.json()["file_path"] is None
+    assert client.get(f"/documents/{doc['id']}/file").status_code == 404
+
+    assert client.get(f"/documents?task_id={tid}").json()[0]["id"] == doc["id"]
+    assert client.delete(f"/documents/{doc['id']}").status_code == 200
+
+
+def test_search_across_everything(client):
+    bid = make_business(client, name="Lens Rental")
+    client.post("/tasks", json={"business_id": bid, "title": "Return lens"})
+    client.post("/contacts", json={"name": "Lenny Cruz"})
+    client.post("/inventory", json={"business_id": bid, "name": "50mm lens"})
+    client.post("/documents", json={"business_id": bid, "title": "Lens manual"})
+    r = client.get("/search?q=len").json()
+    assert [x["title"] for x in r["records"]] == ["Return lens"]
+    assert [x["name"] for x in r["contacts"]] == ["Lenny Cruz"]
+    assert [x["name"] for x in r["inventory"]] == ["50mm lens"]
+    assert [x["title"] for x in r["documents"]] == ["Lens manual"]
+    assert [x["name"] for x in r["spaces"]] == ["Lens Rental"]
+    assert client.get("/search?q=l").json()["records"] == []
+
+
+def test_delete_space_cascades_and_trashes_files(client):
+    import base64
+    import workspace
+    bid = make_business(client)
+    client.post("/inventory", json={"business_id": bid, "name": "Flour"})
+    doc = client.post("/documents", json={
+        "business_id": bid, "title": "menu", "file_name": "menu.txt",
+        "file_content": base64.b64encode(b"cakes").decode()}).json()
+    backups = database.DB_PATH.parent / "backups"
+    before = len(list(backups.glob("auto-*.db"))) if backups.exists() else 0
+    assert client.delete(f"/businesses/{bid}").status_code == 200
+    assert len(list(backups.glob("auto-*.db"))) == before + 1
+    assert client.get("/inventory").json() == []
+    assert (workspace.TRASH_DIR / doc["file_path"]).is_file()
+
+
+def test_capture_links_customer_item_and_kind(client):
+    bid = make_business(client, name="Lens Rental")
+    cam = client.post("/inventory", json={"business_id": bid,
+                                          "name": "Canon R6"}).json()
+    client.post("/contacts", json={"name": "Maria"})
+    ai = {"record_type": "booking_request", "title": "Rent camera",
+          "person": "Maria", "subject": "Canon R6 body",
+          "due_date": None, "due_time": None, "end_time": None,
+          "amount": 1500, "notes": None}
+    with patch.object(main.requests, "post", return_value=FakeResponse(ai)):
+        r = client.post("/extract/message", json={
+            "business_id": bid,
+            "message": "Maria wants to rent the Canon R6 for 1500"}).json()
+    assert r["kind"] == "booking"
+    assert r["inventory_id"] == cam["id"]
+    assert r["contact_is_new"] is False and r["contact_id"]
+    assert r["payment_status"] == "unpaid"
+
+    assert main.kind_for("appointment") == "event"
+    assert main.kind_for("payment") == "payment"
+    assert main.kind_for("content_task") == "task"
+
+
+def test_migration_links_existing_customer_text(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript("""
+            CREATE TABLE businesses (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL, business_type TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              business_id INTEGER NOT NULL, title TEXT NOT NULL,
+              customer TEXT, item TEXT, due_date TEXT, amount REAL,
+              notes TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+            INSERT INTO businesses (name, business_type) VALUES ('Shop', 'x');
+            INSERT INTO tasks (business_id, title, customer) VALUES
+              (1, 'a', 'Ana'), (1, 'b', ' ana '), (1, 'c', NULL), (1, 'd', 'Ben');
+        """)
+    with patch.object(database, "DB_PATH", db):
+        database.init_db()
+        database.init_db()  # idempotent
+        tasks = database.list_tasks(sort="created")
+        contacts = database.list_contacts()
+    assert sorted(c["name"] for c in contacts) == ["Ana", "Ben"]
+    by_title = {t["title"]: t for t in tasks}
+    assert by_title["a"]["contact_id"] == by_title["b"]["contact_id"]
+    assert by_title["b"]["customer"] == " ana "  # original text untouched
+    assert by_title["c"]["contact_id"] is None
+    assert all(t["kind"] == "task" for t in tasks)
