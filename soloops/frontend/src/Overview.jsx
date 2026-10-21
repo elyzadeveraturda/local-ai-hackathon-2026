@@ -12,6 +12,8 @@ import QuickAddTask from "./QuickAddTask";
 import PlanMyDay from "./PlanMyDay";
 import RichText from "./RichText";
 import { FOCUS_LOGGED_EVENT } from "./useFocusTimer";
+import { useApi } from "./useApi";
+import { money, balance } from "./records";
 
 const ASK_CHIPS = [
   "What should I prioritize today?",
@@ -51,6 +53,15 @@ export default function Overview({
   const [askError, setAskError] = useState("");
 
   const [focusToday, setFocusToday] = useState(null);
+  // refetched whenever the day's data changes
+  const summary = useApi("/summary", [attention]);
+  const owedRecords = useApi("/tasks?payment=open", [attention]);
+  const usesPayments = spaces.some((s) => (s.modules || []).includes("payments"));
+  const owedBySpace = {};
+  (owedRecords.data || []).forEach((r) => {
+    owedBySpace[r.business_id] = (owedBySpace[r.business_id] || 0) + (balance(r) || 0);
+  });
+  const lowStock = summary.data?.low_stock || [];
 
   useEffect(() => {
     let alive = true;
@@ -174,14 +185,37 @@ export default function Overview({
             <span className="glance-num">{attention.counts.upcoming}</span>
             <span className="glance-label">Next 3 days</span>
           </button>
-          <button className="glance-item" onClick={() => onLockIn(null)}>
-            <span className="glance-num">
-              {focusToday ? focusToday.focus_minutes : "–"}
-              <small> min</small>
-            </span>
-            <span className="glance-label">Focused today</span>
-          </button>
+          {usesPayments ? (
+            <button className="glance-item" onClick={() => onNavigate("payments")}>
+              <span className="glance-num glance-money">
+                {summary.data ? money(summary.data.money.outstanding) : "–"}
+              </span>
+              <span className="glance-label">
+                Awaiting payment
+                {summary.data?.money.count ? ` · ${summary.data.money.count}` : ""}
+              </span>
+            </button>
+          ) : (
+            <button className="glance-item" onClick={() => onLockIn(null)}>
+              <span className="glance-num">
+                {focusToday ? focusToday.focus_minutes : "–"}
+                <small> min</small>
+              </span>
+              <span className="glance-label">Focused today</span>
+            </button>
+          )}
         </div>
+      )}
+
+      {lowStock.length > 0 && (
+        <button type="button" className="stock-alert" onClick={() => onNavigate("inventory")}>
+          ⚠ Running low:{" "}
+          {lowStock
+            .slice(0, 4)
+            .map((i) => `${i.name} (${i.quantity} left)`)
+            .join(", ")}
+          {lowStock.length > 4 && ` and ${lowStock.length - 4} more`}
+        </button>
       )}
 
       <div className="space-cards">
@@ -215,6 +249,9 @@ export default function Overview({
                   ? `${next.title} · due ${shortDate(next.due_date)}`
                   : "Nothing scheduled"}
               </div>
+              {owedBySpace[space.id] > 0 && (
+                <div className="space-card-owed">{money(owedBySpace[space.id])} awaiting payment</div>
+              )}
             </button>
           );
         })}

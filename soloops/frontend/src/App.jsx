@@ -12,10 +12,21 @@ import { apiFetch } from "./api";
 import { spaceColor } from "./spaces";
 import { useFocusTimer } from "./useFocusTimer";
 import FloatingTimer from "./FloatingTimer";
+import WorkView from "./WorkView";
+import CustomersPage from "./CustomersPage";
+import InventoryPage from "./InventoryPage";
+import DocumentsPage from "./DocumentsPage";
+import SearchPalette from "./SearchPalette";
+import TaskEditor from "./TaskEditor";
 
 const PAGE_NAMES = {
   overview: "Overview",
   space: "Space",
+  work: "Work",
+  payments: "Payments",
+  customers: "Customers",
+  inventory: "Inventory",
+  documents: "Documents",
   calendar: "Calendar",
   ask: "Assistant",
   capture: "AI Capture",
@@ -30,8 +41,33 @@ function initialPage() {
   return {
     page: PAGE_NAMES[page] ? page : "overview",
     spaceId: spaceId ? Number(spaceId) : null,
+    tab: params.get("tab") || "overview",
   };
 }
+
+// pages that show one kind of data across every space
+const LIBRARY = {
+  work: {
+    title: "All work",
+    sub: "Every task, event, booking, payment and deadline across your spaces.",
+  },
+  payments: {
+    title: "Payments",
+    sub: "Who has paid and who still owes you, across every space.",
+  },
+  customers: {
+    title: "Customers",
+    sub: "Everyone you work with, what they've booked and what they owe.",
+  },
+  inventory: {
+    title: "Inventory",
+    sub: "Stock you sell and items you rent out.",
+  },
+  documents: {
+    title: "Documents",
+    sub: "Contracts, receipts, price lists and notes — kept on this computer.",
+  },
+};
 
 function App() {
   const init = initialPage();
@@ -45,14 +81,20 @@ function App() {
   const [attention, setAttention] = useState(null);
   const [aiOnline, setAiOnline] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [tab, setTab] = useState(init.tab);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [openTarget, setOpenTarget] = useState(null);
+  const [recordOpen, setRecordOpen] = useState(null);
   const timer = useFocusTimer();
 
   // keep the URL in step with the page so Back/Forward and reloads work
-  function pushUrl(nextPage, nextSpaceId) {
+  function pushUrl(nextPage, nextSpaceId, nextTab) {
     const params = new URLSearchParams();
     params.set("page", nextPage);
     if (nextPage === "space" && nextSpaceId != null) {
       params.set("space", String(nextSpaceId));
+      if (nextTab && nextTab !== "overview") params.set("tab", nextTab);
     }
     const url = `?${params}`;
     if (url !== window.location.search) {
@@ -65,6 +107,7 @@ function App() {
       const next = initialPage();
       setPage(next.page);
       if (next.spaceId != null) setSpaceId(next.spaceId);
+      setTab(next.tab);
       setNavOpen(false);
     }
     window.addEventListener("popstate", onPop);
@@ -80,14 +123,31 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
-  const refresh = useCallback(() => {
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const loadShell = useCallback(() => {
     apiFetch("/businesses").then(setSpaces).catch(() => {});
     apiFetch("/attention").then(setAttention).catch(() => {});
   }, []);
 
+  // after an edit: reload the shell and tell open lists to refetch
+  const refresh = useCallback(() => {
+    loadShell();
+    setRefreshKey((k) => k + 1);
+  }, [loadShell]);
+
   useEffect(() => {
-    refresh();
-  }, [page, refresh]);
+    loadShell();
+  }, [page, loadShell]);
 
   useEffect(() => {
     apiFetch("/health")
@@ -108,11 +168,36 @@ function App() {
     }
     if (target === "space") {
       setSpaceId(opts.spaceId ?? spaceId);
+      setTab(opts.tab || "overview");
     }
+    setOpenTarget(opts.openId ? { page: target, id: opts.openId } : null);
     setPage(target);
     setNavOpen(false);
-    pushUrl(target, opts.spaceId ?? spaceId);
+    pushUrl(target, opts.spaceId ?? spaceId, opts.tab);
   }
+
+  function changeTab(nextTab) {
+    setTab(nextTab);
+    setOpenTarget(null);
+    pushUrl("space", spaceId, nextTab);
+  }
+
+  function openFromSearch(type, item) {
+    if (type === "records") {
+      apiFetch(`/tasks/${item.id}`).then(setRecordOpen).catch(() => {});
+    } else if (type === "contacts") {
+      navigate("customers", { openId: item.id });
+    } else if (type === "inventory") {
+      navigate("inventory", { openId: item.id });
+    } else if (type === "documents") {
+      navigate("documents", { openId: item.id });
+    } else if (type === "spaces") {
+      navigate("space", { spaceId: item.id });
+    }
+  }
+
+  // show cross-space pages only for modules some space actually uses
+  const enabled = new Set(spaces.flatMap((s) => s.modules || ["work"]));
 
   function openLockIn(taskId) {
     setPrevPage(page);
@@ -161,6 +246,13 @@ function App() {
   const spaceSelect = (
     <>
       {navItem("overview", "Overview")}
+      <p className="sidebar-label">Across your spaces</p>
+      {navItem("work", "All work")}
+      {enabled.has("payments") && navItem("payments", "Payments")}
+      {navItem("calendar", "Calendar")}
+      {enabled.has("customers") && navItem("customers", "Customers")}
+      {enabled.has("inventory") && navItem("inventory", "Inventory")}
+      {navItem("documents", "Documents")}
       <p className="sidebar-label">Spaces</p>
       {[...spaces]
         .sort((a, b) => a.id - b.id)
@@ -183,7 +275,6 @@ function App() {
           </button>
         ))}
       <p className="sidebar-label">Tools</p>
-      {navItem("calendar", "Calendar")}
       {navItem("ask", "Assistant")}
       {navItem("capture", "AI Capture")}
       {navItem("spaces", "Manage spaces")}
@@ -224,7 +315,6 @@ function App() {
           <span className="brand-glyph">✦</span>
           SoloOps
         </div>
-        <p className="sidebar-label">Personal workspace</p>
         <nav>{spaceSelect}</nav>
         <button className="focus-nav-button" onClick={() => openLockIn(null)}>
           <strong>◷ Focus mode</strong>
@@ -261,8 +351,74 @@ function App() {
             <span />
           </button>
           <span className="crumb">My workspace / {crumbName}</span>
+          <button
+            type="button"
+            className="search-btn"
+            onClick={() => setSearchOpen(true)}
+            aria-label="Search everything"
+          >
+            <span aria-hidden="true">⌕</span> Search
+            <kbd>{navigator.platform?.startsWith("Mac") ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
           <span className="topbar-date">{dateLabel}</span>
         </div>
+
+        {LIBRARY[page] && (
+          <div className="page-head">
+            <h1>{LIBRARY[page].title}</h1>
+            <p className="page-sub">{LIBRARY[page].sub}</p>
+          </div>
+        )}
+        {spaces.length === 0 && LIBRARY[page] && attention !== null && (
+          <div className="empty-state">
+            <p>Create a space first — one for each business or part of your life.</p>
+            <button type="button" className="btn btn-small" onClick={() => navigate("spaces")}>
+              Create a space
+            </button>
+          </div>
+        )}
+        {spaces.length > 0 && (page === "work" || page === "payments") && (
+          <WorkView
+            key={page}
+            spaces={spaces}
+            viewKey={page}
+            defaultView={page === "payments" ? "table" : "list"}
+            preset={
+              page === "payments"
+                ? { payment: "open", status: "all", sort: "balance", newKind: "payment" }
+                : {}
+            }
+            refreshKey={refreshKey}
+            onChanged={refresh}
+            onLockIn={openLockIn}
+          />
+        )}
+        {spaces.length > 0 && page === "customers" && (
+          <CustomersPage
+            spaces={spaces}
+            refreshKey={refreshKey}
+            onChanged={refresh}
+            onLockIn={openLockIn}
+            openId={openTarget?.page === "customers" ? openTarget.id : null}
+          />
+        )}
+        {spaces.length > 0 && page === "inventory" && (
+          <InventoryPage
+            spaces={spaces}
+            refreshKey={refreshKey}
+            onChanged={refresh}
+            onLockIn={openLockIn}
+            openId={openTarget?.page === "inventory" ? openTarget.id : null}
+          />
+        )}
+        {spaces.length > 0 && page === "documents" && (
+          <DocumentsPage
+            spaces={spaces}
+            refreshKey={refreshKey}
+            onChanged={refresh}
+            openId={openTarget?.page === "documents" ? openTarget.id : null}
+          />
+        )}
 
         {page === "overview" && (
           <Overview
@@ -282,6 +438,9 @@ function App() {
             onNavigate={navigate}
             onChanged={refresh}
             onLockIn={openLockIn}
+            tab={tab}
+            onTab={changeTab}
+            refreshKey={refreshKey}
           />
         )}
         {page === "calendar" && (
@@ -318,6 +477,19 @@ function App() {
         tasks={attention?.tasks || []}
         onOpenFocus={() => openLockIn(timer.taskId)}
       />
+      {searchOpen && (
+        <SearchPalette onClose={() => setSearchOpen(false)} onSelect={openFromSearch} />
+      )}
+      {recordOpen && (
+        <TaskEditor
+          key={recordOpen.id}
+          task={recordOpen}
+          spaces={spaces}
+          onClose={() => setRecordOpen(null)}
+          onChanged={refresh}
+          onLockIn={openLockIn}
+        />
+      )}
     </div>
   );
 }

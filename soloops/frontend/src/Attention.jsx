@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiFetch } from "./api";
 import { spaceColor, dueText } from "./spaces";
 import TaskEditor from "./TaskEditor";
+import { KindBadge, StatusBadge, PaymentBadge } from "./Badges";
 
 export default function Attention({
   data,
@@ -94,10 +95,19 @@ export default function Attention({
                       {task.business_name}
                     </span>
                     {` · ${dueText(task)}`}
-                    {task.customer && ` · ${task.customer}`}
-                    {task.amount != null && ` · ₱${task.amount}`}
+                    {(task.contact_name || task.customer) && ` · ${task.contact_name || task.customer}`}
                   </small>
                 </button>
+                <div className="row-pills">
+                  {task.kind && task.kind !== "task" && <KindBadge kind={task.kind} />}
+                  {task.status === "in_progress" && <StatusBadge status="in_progress" />}
+                  <PaymentBadge record={task} />
+                  {task.availability_warning && (
+                    <span className="pill pay-unpaid" title={task.availability_warning}>
+                      Double-booked
+                    </span>
+                  )}
+                </div>
                 <div className="task-actions">
                   <button
                     className="link-button"

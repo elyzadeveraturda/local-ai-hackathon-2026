@@ -4,6 +4,18 @@
 
 SoloOps AI is a private, local-first assistant for one person juggling many roles — a student keeping up with classes and a scholarship, running a camera rental side business, helping manage the family's rental property, posting on TikTok, and staying on top of personal life. Each role is a **Space**; everything you save stays in a local SQLite file, and all AI inference runs on your machine through [Ollama](https://ollama.com) using `qwen2.5:3b`.
 
+## Running several businesses
+
+Each business (or part of your life) is a **Space**. A space shows the tabs it needs — **Work, Payments, Customers, Inventory, Documents** — with sensible defaults per category (a Business gets all five, an Academic space gets Work and Documents). Use **Customize tabs** on any space to change that; hiding a tab never deletes anything.
+
+- **Connected records** — every item in Work is a *task, event, booking, payment or deadline* with a status (*To do / In progress / Done*). A record can link to a **customer**, an **inventory item**, a **payment** (amount, unpaid / partly paid / paid) and any number of **documents**. Type a new customer's name on a booking and they're added to Customers automatically.
+- **Views that fit the work** — **List** (grouped by Overdue / Today / Next 7 days / Later), **Table** (scan amounts, customers and items), and **Board** (drag between To do / In progress / Done, or use the card's status menu). Calendar shows everything with a date. Search, type filters, status, payment and space filters and sorting are on every view, and the chosen layout is remembered.
+- **Across every space** — sidebar pages for *All work, Payments, Calendar, Customers, Inventory* and *Documents* show the same data across all spaces; each space's tabs show only its own.
+- **Payments** — the Payments view lists everything awaiting payment with the total still to collect; customers show what they owe; the dashboard shows the total and each space card shows its own.
+- **Inventory** — stock with quick +/− buttons, a "warn me at" level, low/out-of-stock badges, stock value, and next booking. Bookings that use an item more times than it's in stock at the same time are flagged **Double-booked**.
+- **Documents** — notes plus an optional file (up to 10 MB, stored on this computer in `soloops/backend/files/`), linked to a record and/or customer. Files open in the browser only for safe types (PDF, images, text); everything else downloads.
+- **Search everything** — press **Ctrl K** / **⌘K** (or the Search button) to find records, customers, items, documents and spaces from anywhere.
+
 ## Features
 
 - **Overview** — a calm home for the whole day: greeting, a **Today at a glance** strip (overdue, due today, next 3 days, minutes focused today — each tile jumps to the task list, calendar or Focus mode), per-space cards with pending counts, overdue flags and next deadlines, a conflict banner when two commitments collide, "Your next moves" (all pending tasks across spaces, prioritised deterministically in Philippine time: Overdue → Due today → Due within 3 days → Later → No date, with **High/Normal/Low importance** breaking ties inside each group), "Today's rhythm" (today's timed schedule), and an on-device assistant panel. Quick-add tasks inline.
@@ -76,7 +88,7 @@ npm run dev
 
 Open http://localhost:5173. Everything binds to `127.0.0.1`/`localhost` only, so your records are not exposed on your network.
 
-The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `tasks.end_date`, `businesses.category` default `'Business'`, `tasks.importance` default `'normal'`, a new `focus_sessions` table, and indexes on `tasks(business_id)` and `tasks(status, due_date)`). Nothing is dropped or rewritten; back up before upgrading anyway. Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
+The database lives at `soloops/backend/soloops.db` (created automatically). Existing databases are upgraded in place via additive migrations only (`tasks.due_time`, `tasks.end_time`, `tasks.end_date`, `businesses.category` default `'Business'`, `tasks.importance` default `'normal'`, a new `focus_sessions` table, and indexes on `tasks(business_id)` and `tasks(status, due_date)`). The business workspace adds: `tasks.kind` (default `'task'`), `tasks.payment_status`, `tasks.amount_paid`, `tasks.contact_id`, `tasks.inventory_id`, `tasks.updated_at`, `businesses.modules`, and new `contacts`, `inventory` and `documents` tables. The first time it runs, existing free-text customer names on tasks become linked customers (the original text is kept). Nothing is dropped or rewritten; back up before upgrading anyway. Internally the `businesses` table and `/businesses` endpoints represent Spaces — the UI terminology changed, the schema did not. Set `SOLOOPS_DB_PATH` to use a different file. To back up:
 
 ```bash
 cp soloops/backend/soloops.db soloops/backend/backups/soloops-$(date +%Y%m%d-%H%M%S).db
@@ -139,9 +151,26 @@ npm run build && npm run lint
 3. **Content** — create a TikTok Content space → AI Capture → paste `I need to finish editing my TikTok video by Friday.` → Save → Ask SoloOps → "What should I prioritize today?" → the reply cites the task under "From your saved records:".
 4. **Offline** — follow the manual offline test above; every feature except live AI inference works without any network.
 
+### Try the main workflows
+
+Seed a demo database (below) and start the app on it, then:
+
+1. **Dashboard** — Overview shows overdue / due today / next 3 days / money awaiting payment, a low-stock warning, and per-space cards with what each space is owed.
+2. **Book a rental** — *All work → + New*, pick **Booking**, choose *Camera Rental*, type a new customer name (it's added to Customers), pick an item, enter an amount. It starts as *Unpaid*.
+3. **See a clash** — the two *Sony A7 IV* bookings today are marked **Double-booked** (one camera, overlapping times).
+4. **Collect money** — *Payments* lists everyone who still owes you and the total. Open a record and set *Partly paid* or *Paid*.
+5. **Switch views** — in *All work*, flip between **List**, **Table** and **Board**; drag a card to *In progress*.
+6. **Customers** — open *Jamie Lee* to see what they owe, their bookings and their documents; start a new booking from there.
+7. **Inventory** — use +/− on stock; open *Sony A7 IV* to see its bookings or **Book this item**.
+8. **Documents** — add a note with a file and link it to a booking.
+9. **Search** — press Ctrl K / ⌘K and type "sony".
+10. **Customize a space** — open *Camera Rental → Customize tabs*.
+11. **AI Capture** (needs Ollama) — paste "Sam Rivera wants to rent the Canon R6 on Saturday, 1400 pesos." It suggests a *Booking*, matches Sam and the Canon EOS R6, and marks it *Unpaid* for you to review.
+12. **Assistant** (needs Ollama) — ask "Who still owes me money?".
+
 ### Demo seed data
 
-For demos, seed a separate database with a realistic multi-space life (5 spaces, 12 tasks, including a real 16:00 conflict between an Economics class and a camera pickup):
+For demos, seed a separate database with a realistic multi-space life (5 spaces, 15 records, 5 customers, 5 inventory items, 4 documents — including a 16:00 conflict between an Economics class and a camera pickup, a double-booked camera, payments still owed and low stock):
 
 ```bash
 cd soloops/backend && source .venv/bin/activate
@@ -174,8 +203,9 @@ The seeder refuses to touch the real `soloops.db` (unless `--allow-main-db`) and
 ```text
 soloops/
 ├── backend/
-│   ├── main.py            # FastAPI app: spaces, tasks (CRUD), extraction, /attention, /calendar,
-│   │                      #   /briefing, /lock-in/plan, /focus-sessions, /chat
+│   ├── main.py            # FastAPI app: spaces, records (CRUD, filters), extraction, /attention,
+│   │                      #   /calendar, /briefing, /lock-in/plan, /focus-sessions, /chat
+│   ├── workspace.py       # customers, inventory, documents (+ files), /search, /summary, space tabs
 │   ├── attention.py       # deterministic priority + conflict logic (Asia/Manila dates)
 │   ├── database.py        # SQLite access, additive migrations, auto backups
 │   ├── seed_demo.py       # demo seeder for a separate DB
@@ -187,7 +217,14 @@ soloops/
     ├── Overview.jsx       # dashboard (glance strip, spaces, plan, next moves, rhythm)
     ├── SpacePage.jsx      # per-space page
     ├── CalendarPage.jsx   # week/month calendar + conflicts
-    ├── TaskEditor.jsx     # edit / complete / delete dialog
+    ├── WorkView.jsx       # list / table / board of records with search, filters, sorting
+    ├── TaskEditor.jsx     # create / edit any record (type, status, customer, item, payment, docs)
+    ├── CustomersPage.jsx  # customers + detail (balance, records, documents)
+    ├── InventoryPage.jsx  # stock, quick adjust, item detail and bookings
+    ├── DocumentsPage.jsx  # notes and files
+    ├── DocumentEditor.jsx # create / edit a document, attach a file
+    ├── SearchPalette.jsx  # Ctrl/⌘ K search across everything
+    ├── Modal.jsx, Badges.jsx, records.js, useApi.js  # shared dialog, status pills, labels, data hook
     ├── QuickAddTask.jsx   # inline task form
     ├── Attention.jsx      # task lists ("Your next moves")
     ├── PlanMyDay.jsx      # AI day plan card
@@ -206,7 +243,9 @@ soloops/
 
 - No authentication (single local user by design). Any program running as you on this machine can call the local API.
 - Dates are computed in Philippine time (Asia/Manila) regardless of the computer's time zone.
-- No specialized modules (no inventory, ledger, GPA tracking) — spaces are general-purpose contexts.
+- Money tracking is per record (amount, paid so far). There are no invoices, taxes, multiple currencies or accounting reports; amounts are shown in pesos.
+- Inventory doesn't change automatically when a booking happens or a sale is made — adjust stock with +/−. Double-booking checks only look at bookings linked to an item with a date.
+- Files are stored on this computer next to the database; back up `soloops/backend/files/` together with `soloops.db`. Replaced or deleted files are moved to `files/.trash/`, not erased.
 - Conflict detection needs tasks to have a start time (end times make ranges, but equal start times still count as overlaps); multi-day spans are excluded from conflict checks.
 - The assistant can explain conflicts and draft messages, but it never changes, moves or cancels anything — all edits are manual.
 - AI output quality depends on the 3B model. It often skips the optional "order" and "steps" fields in Plan my day (SoloOps then uses its own order, and "Break it down" is available on demand), and focus checklists can mention tools that aren't in your notes. Deterministic guards catch the common failure modes, but always review.

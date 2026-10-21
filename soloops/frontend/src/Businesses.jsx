@@ -2,6 +2,16 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import { categoryBadgeStyle, spaceColor } from "./spaces";
+import { MODULES } from "./records";
+
+// mirrors the backend defaults; used until the user picks tabs
+const DEFAULT_MODULES = {
+  Business: ["work", "payments", "customers", "inventory", "documents"],
+  "Content Creation": ["work", "payments", "customers", "documents"],
+  Academic: ["work", "documents"],
+  Personal: ["work", "documents"],
+  Custom: ["work", "documents"],
+};
 
 const SPACE_CATEGORIES = [
   "Academic",
@@ -12,6 +22,20 @@ const SPACE_CATEGORIES = [
 ];
 
 const TEMPLATES = [
+  {
+    label: "Online Shop",
+    name: "Online Shop",
+    category: "Business",
+    business_type: "Online selling",
+    description: "Products, orders, deliveries and stock",
+  },
+  {
+    label: "Freelance Services",
+    name: "Freelance Studio",
+    category: "Business",
+    business_type: "Freelance services",
+    description: "Client projects, quotes, invoices and files",
+  },
   {
     label: "College & Scholarship",
     name: "College & Scholarship",
@@ -55,6 +79,7 @@ const emptyForm = {
   category: "Academic",
   business_type: "",
   description: "",
+  modules: null,
 };
 
 export default function Businesses({ onCountChange }) {
@@ -96,6 +121,7 @@ export default function Businesses({ onCountChange }) {
       category: business.category || "Business",
       business_type: business.business_type,
       description: business.description,
+      modules: business.modules || null,
     });
   }
 
@@ -111,7 +137,19 @@ export default function Businesses({ onCountChange }) {
       category: template.category,
       business_type: template.business_type,
       description: template.description,
+      modules: null,
     });
+  }
+
+  const effectiveModules =
+    form.modules || DEFAULT_MODULES[form.category] || ["work"];
+
+  function toggleModule(value) {
+    if (value === "work") return;
+    const next = effectiveModules.includes(value)
+      ? effectiveModules.filter((m) => m !== value)
+      : [...effectiveModules, value];
+    setForm({ ...form, modules: MODULES.map((m) => m.value).filter((m) => next.includes(m)) });
   }
 
   async function save(event) {
@@ -133,7 +171,10 @@ export default function Businesses({ onCountChange }) {
 
       await apiFetch(url, {
         method: editingId ? "PUT" : "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          modules: form.modules ?? undefined,
+        }),
       });
 
       cancel();
@@ -148,12 +189,15 @@ export default function Businesses({ onCountChange }) {
   async function remove(business) {
     const { id, name } = business;
     const count = business.task_count || 0;
-    const message =
-      count > 0
-        ? `Delete "${name}" and its ${count} task${count === 1 ? "" : "s"}` +
-          ` (${business.pending_count || 0} still pending)?\n\n` +
-          "A backup of your data is saved automatically before deleting."
-        : `Delete "${name}"? It has no tasks.`;
+    const parts = [
+      count && `${count} record${count === 1 ? "" : "s"} (${business.pending_count || 0} not done)`,
+      business.inventory_count && `${business.inventory_count} inventory item${business.inventory_count === 1 ? "" : "s"}`,
+      business.document_count && `${business.document_count} document${business.document_count === 1 ? "" : "s"}`,
+    ].filter(Boolean);
+    const message = parts.length
+      ? `Delete "${name}" with ${parts.join(", ")}?\n\n` +
+        "A backup of your data is saved automatically before deleting. Customers are kept."
+      : `Delete "${name}"? It's empty.`;
     if (!window.confirm(message)) {
       return;
     }
@@ -177,8 +221,9 @@ export default function Businesses({ onCountChange }) {
       <div className="page-head">
         <h1>Manage spaces</h1>
         <p className="page-sub">
-          Each space is one part of your life. SoloOps uses its
-          description to personalize AI help.
+          One space per business or part of your life. Each gets its
+          own work, customers, stock and documents, and the description
+          helps the on-device AI understand it.
         </p>
       </div>
 
@@ -243,6 +288,23 @@ export default function Businesses({ onCountChange }) {
               required
             />
           </label>
+          <fieldset className="span-2 module-pick">
+            <legend>Tabs in this space</legend>
+            {MODULES.map((m) => (
+              <label key={m.value} className="module-chip">
+                <input
+                  type="checkbox"
+                  checked={effectiveModules.includes(m.value)}
+                  disabled={m.value === "work"}
+                  onChange={() => toggleModule(m.value)}
+                />
+                {m.label}
+              </label>
+            ))}
+            <small className="muted">
+              {form.modules ? "Your choice." : `Suggested for ${form.category}.`} You can change this any time.
+            </small>
+          </fieldset>
           <label className="span-2">
             Description
             <textarea
