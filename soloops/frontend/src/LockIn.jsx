@@ -72,7 +72,7 @@ export default function LockIn({ initialTaskId, spaces = [], onChanged, timer })
   const running = timer.running;
 
   useEffect(() => {
-    apiFetch("/tasks?status=pending")
+    apiFetch("/tasks?status=open")
       .then((data) => {
         const today = new Date(
           `${new Date().toLocaleDateString("en-CA")}T00:00:00`

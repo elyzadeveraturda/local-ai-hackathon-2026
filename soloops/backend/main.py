@@ -346,9 +346,20 @@ def chat(request: ChatRequest):
         business_id=selected_space["id"] if selected_space else None,
         low_only=True,
     )
+    owed = list_tasks(
+        payment="open", sort="balance", direction="desc",
+        business_id=selected_space["id"] if selected_space else None,
+    )
+    owed_lines = "".join(
+        f"\n  - {t.get('contact_name') or t.get('customer') or 'Someone'}"
+        f" owes the user PHP {t['amount'] - (t.get('amount_paid') or 0):,.0f}"
+        f" for \"{t['title']}\" ({t['business_name']})"
+        for t in owed[:8]
+    )
     business_text = (
-        f"- Awaiting payment: {money['count']} record(s), "
-        f"{money['outstanding']:g} outstanding in total\n"
+        f"- Money owed TO the user (customers who have not paid yet): "
+        f"{money['count']} record(s), PHP {money['outstanding']:,.0f} in "
+        f"total{owed_lines}\n"
         + (
             "- Low stock: " + ", ".join(
                 f"{i['name']} ({i['quantity']} left, {i['business_name']})"
@@ -386,6 +397,9 @@ Rules:
 - If a record is not listed, say you don't have it saved.
 - Copy due dates and their status (overdue / today / in N days)
   exactly as written; never recalculate or change them.
+- Money: amounts are in Philippine pesos (write them as ₱). The
+  "Money owed TO the user" list is money customers owe the user —
+  never say the user owes them. Quote amounts exactly as listed.
 - When prioritizing, overdue tasks come before everything else.
 - It's fine to brainstorm or plan when asked (e.g. TikTok ideas,
   study plans), but label it as generated advice, not fact.
@@ -680,11 +694,21 @@ def person_in_message(person, message):
     return first_token.lower() in message.lower()
 
 
+TIME_RANGE_RE = re.compile(
+    r"\d\s*(?::\d{2})?\s*(?:[ap]\.?\s?m\.?)?\s*"
+    r"(?:-|–|—|to|until|till)\s*\d",
+    re.IGNORECASE,
+)
+
+
 def apply_extraction_guards(result, message):
     if not has_date_cue(message):
         result["due_date"] = None
     if not has_time_cue(message):
         result["due_time"] = None
+        result["end_time"] = None
+    # "at 2 PM" has no end; only keep one when the text gives a range
+    if not TIME_RANGE_RE.search(message):
         result["end_time"] = None
     if not re.search(r"\d", message):
         result["amount"] = None
@@ -724,6 +748,31 @@ def kind_for(record_type):
     return "task"
 
 
+def _words(text):
+    return set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+def match_inventory(subject, items):
+    """Best inventory item for a free-text subject, or None.
+
+    "Canon R6" matches "Canon EOS R6": every word of one side appears
+    in the other, or they share at least two words. Ties go to the
+    item sharing the most words."""
+    want = _words(subject)
+    if not want:
+        return None
+    best, best_score = None, 0
+    for inv in items:
+        have = _words(inv["name"])
+        shared = len(want & have)
+        if not shared:
+            continue
+        if want <= have or have <= want or shared >= 2:
+            if shared > best_score:
+                best, best_score = inv, shared
+    return best
+
+
 def link_capture(result, business):
     """Suggest a record type, customer and inventory item for a capture.
     Only links to things that already exist; a new customer is just
@@ -735,16 +784,12 @@ def link_capture(result, business):
     result["contact_is_new"] = bool(person) and result["contact_id"] is None
 
     result["inventory_id"] = None
-    subject = (result.get("subject") or "").strip().lower()
+    subject = (result.get("subject") or "").strip()
     if subject:
-        best = None
-        for inv in list_inventory(
-            ph_today().isoformat(), business_id=business["id"]
-        ):
-            name = inv["name"].strip().lower()
-            if name and (name in subject or subject in name):
-                if best is None or len(name) > len(best["name"]):
-                    best = inv
+        best = match_inventory(
+            subject,
+            list_inventory(ph_today().isoformat(), business_id=business["id"]),
+        )
         if best:
             result["inventory_id"] = best["id"]
 
@@ -1590,7 +1635,9 @@ def reopen_task(task_id: int):
 
 @app.get("/attention")
 def attention():
-    return build_attention(list_tasks(), ph_today())
+    data = build_attention(list_tasks(), ph_today())
+    annotate_availability(data["tasks"])
+    return data
 
 
 @app.get("/calendar")

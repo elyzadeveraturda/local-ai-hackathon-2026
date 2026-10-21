@@ -4,8 +4,10 @@ Usage:
     python seed_demo.py --db demo.db
     SOLOOPS_DB_PATH=demo.db uvicorn main:app --port 8000
 
-Creates a multi-space personal workspace with a real schedule
-conflict today (Economics class vs Sony A7 IV pickup, both 16:00).
+Creates a multi-space workspace with a real schedule conflict today
+(Economics class vs Sony A7 IV pickup, both 16:00), linked customers,
+rental gear (one item double-booked, one low on stock), payments still
+owed and a few documents.
 Never deletes data; refuses to run on the real soloops.db unless
 --allow-main-db is passed, and refuses non-empty databases.
 """
@@ -81,44 +83,115 @@ def main():
         "Personal",
     )
 
+    # customers and gear first, so records can link to them
+    def contact(name, space, phone=None, email=None, notes=""):
+        return database.create_contact({
+            "name": name, "business_id": space["id"], "phone": phone,
+            "email": email, "notes": notes,
+        })["id"]
+
+    jamie = contact("Jamie Lee", camera, "0917 555 0142",
+                    notes="Film student, always returns on time")
+    sam = contact("Sam Rivera", camera, email="sam.rivera@example.com")
+    jordan = contact("Jordan Ellis", prop, "0918 555 0199",
+                     notes="Unit C tenant")
+    casey = contact("Casey Park", prop, notes="Unit B tenant")
+    brand = contact("Lumen Studios", tiktok, email="collabs@example.com",
+                    notes="Gear brand, paid collab")
+
+    def item(space, name, qty, reorder=None, price=None, unit=None, sku=None):
+        return database.create_inventory_item({
+            "business_id": space["id"], "name": name, "quantity": qty,
+            "reorder_at": reorder, "price": price, "unit": unit,
+            "sku": sku, "notes": "",
+        }, today.isoformat())["id"]
+
+    a7 = item(camera, "Sony A7 IV", 1, price=1500, sku="CAM-A7")
+    r6 = item(camera, "Canon EOS R6", 1, price=1400, sku="CAM-R6")
+    item(camera, "50mm f/1.8 lens", 3, reorder=1, price=350, sku="LNS-50")
+    item(camera, "NP-FZ100 battery", 1, reorder=2, unit="pcs", sku="BAT-FZ")
+    item(prop, "Spare unit keys", 2, reorder=2, unit="sets")
+
     T = [
-        (college["id"], "Economics class", d(0), "16:00", "17:30",
-         None, None, None, "Room 204"),
-        (college["id"], "Economics study block", d(0), "09:00", "10:30",
-         None, None, None, ""),
-        (college["id"], "Submit Economics problem set", d(1), "23:59",
-         None, None, None, None, ""),
-        (college["id"], "Upload scholarship progress report", d(2),
-         "17:00", None, None, None, None,
-         "600 words + transcript"),
-        (camera["id"], "Sony A7 IV pickup with Jamie", d(0), "16:00",
-         "16:30", "Jamie Lee", "Sony A7 IV", 90, ""),
-        (camera["id"], "Check Canon R6 on return", d(1), "11:00", None,
-         "Sam Rivera", "Canon EOS R6", None, ""),
-        (prop["id"], "Follow up on Unit C's overdue rent", d(-4), None,
-         None, "Jordan Ellis", None, 1100, ""),
-        (prop["id"], "Confirm Unit B's October payment", d(0), "11:30",
-         "12:00", "Casey Park", None, 950, ""),
-        (tiktok["id"], "Film 'student founder' clip", d(0), "14:00",
-         "15:00", None, None, None, ""),
-        (tiktok["id"], "Edit 'what's in my camera bag'", d(1), "15:00",
-         None, None, None, None, ""),
-        (personal["id"], "Dental appointment", d(3), "10:00", "11:00",
-         None, None, None, ""),
-        (personal["id"], "Organize important documents", None, None,
-         None, None, None, None, ""),
+        dict(business_id=college["id"], title="Economics class",
+             kind="event", due_date=d(0), due_time="16:00",
+             end_time="17:30", notes="Room 204"),
+        dict(business_id=college["id"], title="Economics study block",
+             kind="event", due_date=d(0), due_time="09:00",
+             end_time="10:30"),
+        dict(business_id=college["id"],
+             title="Submit Economics problem set", kind="deadline",
+             due_date=d(1), due_time="23:59"),
+        dict(business_id=college["id"],
+             title="Upload scholarship progress report", kind="deadline",
+             due_date=d(2), due_time="17:00", importance="high",
+             notes="600 words + transcript", status="in_progress"),
+        dict(business_id=camera["id"], title="Sony A7 IV pickup with Jamie",
+             kind="booking", due_date=d(0), due_time="16:00",
+             end_time="16:30", customer="Jamie Lee", contact_id=jamie,
+             item="Sony A7 IV", inventory_id=a7, amount=1500,
+             payment_status="partial", amount_paid=500),
+        dict(business_id=camera["id"], title="Weekend shoot rental",
+             kind="booking", due_date=d(0), customer="Sam Rivera",
+             contact_id=sam, item="Sony A7 IV", inventory_id=a7,
+             amount=1500, payment_status="unpaid",
+             notes="Wants it for the whole day — clashes with Jamie"),
+        dict(business_id=camera["id"], title="Check Canon R6 on return",
+             due_date=d(1), due_time="11:00", customer="Sam Rivera",
+             contact_id=sam, item="Canon EOS R6", inventory_id=r6),
+        dict(business_id=camera["id"], title="Reorder camera batteries",
+             due_date=d(2)),
+        dict(business_id=prop["id"],
+             title="Unit C rent — October", kind="payment",
+             due_date=d(-4), customer="Jordan Ellis", contact_id=jordan,
+             amount=1100, payment_status="unpaid", importance="high"),
+        dict(business_id=prop["id"], title="Unit B rent — October",
+             kind="payment", due_date=d(0), due_time="11:30",
+             end_time="12:00", customer="Casey Park", contact_id=casey,
+             amount=950, payment_status="paid", amount_paid=950,
+             status="completed"),
+        dict(business_id=tiktok["id"], title="Film 'student founder' clip",
+             due_date=d(0), due_time="14:00", end_time="15:00"),
+        dict(business_id=tiktok["id"],
+             title="Lumen Studios sponsored video", kind="payment",
+             due_date=d(10), customer="Lumen Studios", contact_id=brand,
+             amount=5000, payment_status="partial", amount_paid=2000,
+             status="in_progress"),
+        dict(business_id=tiktok["id"],
+             title="Edit 'what's in my camera bag'", due_date=d(1),
+             due_time="15:00"),
+        dict(business_id=personal["id"], title="Dental appointment",
+             kind="event", due_date=d(3), due_time="10:00",
+             end_time="11:00"),
+        dict(business_id=personal["id"],
+             title="Organize important documents"),
     ]
 
-    for (bid, title, date_, start, end, cust, item, amount, notes) in T:
-        database.create_task(
-            business_id=bid, title=title, customer=cust, item=item,
-            due_date=date_, due_time=start, end_time=end,
-            amount=amount, notes=notes,
-        )
+    created = [database.create_task(**t) for t in T]
+    by_title = {t["title"]: t for t in created}
+
+    def doc(space, title, body, task=None, contact_id=None):
+        database.create_document({
+            "business_id": space["id"], "title": title, "body": body,
+            "task_id": by_title[task]["id"] if task else None,
+            "contact_id": contact_id,
+        })
+
+    doc(camera, "Rental terms",
+        "Deposit 50% on booking, balance on pickup. Valid ID required. "
+        "Late returns ₱300/day.")
+    doc(camera, "Jamie — ID and deposit receipt",
+        "Student ID checked. ₱500 deposit via GCash.",
+        task="Sony A7 IV pickup with Jamie", contact_id=jamie)
+    doc(prop, "Unit C lease", "12-month lease, rent due on the 15th.",
+        task="Unit C rent — October", contact_id=jordan)
+    doc(tiktok, "Lumen Studios brief",
+        "60-second review, 2 revisions, posting window next week.",
+        task="Lumen Studios sponsored video", contact_id=brand)
 
     print(
-        f"Seeded {db_path}: 5 spaces, {len(T)} tasks "
-        f"(today = {today})."
+        f"Seeded {db_path}: 5 spaces, {len(T)} records, 5 customers, "
+        f"5 inventory items, 4 documents (today = {today})."
     )
 
 

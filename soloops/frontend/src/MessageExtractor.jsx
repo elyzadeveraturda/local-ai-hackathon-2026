@@ -2,35 +2,29 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 import DateRangeFields from "./DateRangeFields";
-import { toTaskFields, fromTaskFields, IMPORTANCE_OPTIONS } from "./spaces";
+import { toTaskFields, fromTaskFields, IMPORTANCE_OPTIONS, formatTime12, shortDate } from "./spaces";
+import { KINDS, KIND_LABEL, PAYMENT_STATUSES, money } from "./records";
+import { useApi, qs } from "./useApi";
 
 const EXAMPLES = [
+  "Maria wants to rent the camera on Saturday at 3 PM, ₱1,500.",
+  "Unit C rent of 1100 is still unpaid, due on the 15th.",
   "Reminder: Scholarship renewal documents must be submitted on October 15.",
   "I need to finish editing my TikTok video by Friday.",
-  "Maria wants to rent the camera on Saturday at 3 PM.",
-  "Schedule my dental appointment next Tuesday.",
 ];
 
-const HIDDEN_KEYS = new Set([
-  "business_id",
-  "space_id",
-  "space_auto",
-  "space_reason",
-  "requires_confirmation",
-  "space_source",
-  "needs_review",
-]);
-
-const LABELS = {
-  record_type: "Record type",
-  title: "Title",
-  person: "Person",
-  subject: "Subject",
-  due_date: "Due date",
-  due_time: "Time",
-  amount: "Amount",
-  notes: "Notes",
-};
+// what the AI found, in plain words (internal fields stay hidden)
+const SHOWN = [
+  ["kind", "Type", (r) => KIND_LABEL[r.kind]],
+  ["title", "Title"],
+  ["person", "Person"],
+  ["subject", "Item / subject"],
+  ["due_date", "Date", (r) => r.due_date && shortDate(r.due_date)],
+  ["due_time", "Time", (r) => r.due_time && formatTime12(r.due_time)],
+  ["end_time", "Until", (r) => r.end_time && formatTime12(r.end_time)],
+  ["amount", "Amount", (r) => r.amount != null && money(r.amount)],
+  ["notes", "Notes"],
+];
 
 function draftFromResult(result) {
   return {
@@ -43,6 +37,9 @@ function draftFromResult(result) {
     amount: result.amount ?? "",
     notes: result.notes || "",
     importance: "normal",
+    kind: result.kind || "task",
+    inventoryId: result.inventory_id ? String(result.inventory_id) : "",
+    paymentStatus: result.payment_status || "",
   };
 }
 
@@ -59,6 +56,10 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [savedTask, setSavedTask] = useState(null);
+  const inventory = useApi(
+    draft?.spaceId ? `/inventory${qs({ business_id: draft.spaceId })}` : null
+  );
+  const itemOptions = inventory.data || [];
 
   useEffect(() => {
     async function loadBusinesses() {
@@ -148,10 +149,14 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
         body: JSON.stringify({
           business_id: draft.spaceId || result.business_id,
           title,
-          customer: draft.person.trim() || null,
-          item: draft.subject.trim() || null,
+          contact_name: draft.person.trim(),
+          inventory_id: draft.inventoryId ? Number(draft.inventoryId) : null,
+          item: draft.inventoryId ? null : draft.subject.trim() || null,
           ...toTaskFields(draft.range),
           amount: draft.amount === "" ? null : Number(draft.amount),
+          payment_status:
+            draft.amount !== "" && draft.paymentStatus ? draft.paymentStatus : null,
+          kind: draft.kind,
           notes,
           importance: draft.importance,
         }),
@@ -311,22 +316,15 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
           )}
 
           <div className="extracted-fields">
-            {Object.entries(result)
-              .filter(([key]) => !HIDDEN_KEYS.has(key))
-              .map(([key, value]) => (
-              <div className="extracted-field" key={key}>
-                <strong>{LABELS[key] || key.replaceAll("_", " ")}</strong>
-                <span>
-                  {value === null
-                    ? "Not provided"
-                    : typeof value === "boolean"
-                    ? value ? "Yes" : "No"
-                    : typeof value === "object"
-                        ? JSON.stringify(value)
-                        : String(value)}
-                </span>
-              </div>
-            ))}
+            {SHOWN.map(([key, label, fmt]) => {
+              const value = fmt ? fmt(result) : result[key];
+              return (
+                <div className="extracted-field" key={key}>
+                  <strong>{label}</strong>
+                  <span className={value ? "" : "muted"}>{value || "Not found"}</span>
+                </div>
+              );
+            })}
           </div>
 
           <h3 className="card-title">Review &amp; save</h3>
@@ -344,9 +342,25 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
             </ul>
           )}
 
+          <div className="kind-picker" role="radiogroup" aria-label="Type">
+            {KINDS.map((k) => (
+              <button
+                key={k.value}
+                type="button"
+                role="radio"
+                aria-checked={draft.kind === k.value}
+                disabled={!!savedTask}
+                className={`pill kind-${k.value}${draft.kind === k.value ? " picked" : ""}`}
+                onClick={() => updateDraft("kind", k.value)}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+
           <div className="task-form">
             <label>
-              Task title *
+              Title *
               <input
                 value={draft.title}
                 maxLength={200}
@@ -355,23 +369,49 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
               />
             </label>
             <label>
-              Person
+              Customer
               <input
                 value={draft.person}
-                maxLength={200}
+                maxLength={120}
                 disabled={!!savedTask}
                 onChange={(e) => updateDraft("person", e.target.value)}
               />
+              {draft.person.trim() && result.contact_is_new && draft.person.trim() === (result.person || "").trim() && (
+                <small className="field-hint">New customer — will be added to Customers</small>
+              )}
+              {draft.person.trim() && result.contact_id && draft.person.trim() === (result.person || "").trim() && (
+                <small className="muted">Matched an existing customer</small>
+              )}
             </label>
-            <label>
-              Item / subject
-              <input
-                value={draft.subject}
-                maxLength={200}
-                disabled={!!savedTask}
-                onChange={(e) => updateDraft("subject", e.target.value)}
-              />
-            </label>
+            {itemOptions.length > 0 ? (
+              <label>
+                Item
+                <select
+                  value={draft.inventoryId}
+                  disabled={!!savedTask}
+                  onChange={(e) => updateDraft("inventoryId", e.target.value)}
+                >
+                  <option value="">
+                    {draft.subject ? `“${draft.subject}” (not in inventory)` : "None"}
+                  </option>
+                  {itemOptions.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label>
+                Item / subject
+                <input
+                  value={draft.subject}
+                  maxLength={200}
+                  disabled={!!savedTask}
+                  onChange={(e) => updateDraft("subject", e.target.value)}
+                />
+              </label>
+            )}
             <div className="span-2">
               <DateRangeFields
                 value={draft.range}
@@ -389,6 +429,21 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
                 disabled={!!savedTask}
                 onChange={(e) => updateDraft("amount", e.target.value)}
               />
+            </label>
+            <label>
+              Payment
+              <select
+                value={draft.paymentStatus}
+                disabled={!!savedTask || draft.amount === ""}
+                onChange={(e) => updateDraft("paymentStatus", e.target.value)}
+              >
+                <option value="">Not tracked</option>
+                {PAYMENT_STATUSES.filter((p) => p.value !== "partial").map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Importance
@@ -422,7 +477,7 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
           {savedTask ? (
             <div className="save-success">
               <p>
-                ✓ Saved as task #{savedTask.id} in{" "}
+                ✓ Saved “{savedTask.title}” to{" "}
                 <strong>{savedTask.business_name}</strong>.
               </p>
               <button type="button" onClick={startOver}>
@@ -437,7 +492,7 @@ export default function MessageExtractor({ initialSpaceId, onChanged }) {
                 onClick={saveAsTask}
                 disabled={saving || !draft.title.trim()}
               >
-                {saving ? "Saving..." : "Save as Task"}
+                {saving ? "Saving..." : "Save"}
               </button>
             </div>
           )}

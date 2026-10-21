@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiFetch } from "./api";
 import DateRangeFields from "./DateRangeFields";
 import { toTaskFields, IMPORTANCE_OPTIONS } from "./spaces";
+import { KINDS } from "./records";
 
 export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel }) {
   const [form, setForm] = useState({
@@ -9,6 +10,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
     title: "",
     notes: "",
     importance: "normal",
+    kind: "task",
   });
   const [range, setRange] = useState({
     allDay: false,
@@ -40,6 +42,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
           ...toTaskFields(range),
           notes: form.notes.trim(),
           importance: form.importance,
+          kind: form.kind,
         }),
       });
       onSaved?.();
@@ -52,7 +55,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
 
   return (
     <form className="card task-form-card" onSubmit={save} style={{ marginBottom: 22 }}>
-      <h3 className="card-title">New task</h3>
+      <h3 className="card-title">Add to your day</h3>
       <div className="task-form task-form-qa">
         <label>
           Space *
@@ -82,6 +85,16 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
           <DateRangeFields value={range} onChange={setRange} />
         </div>
         <label>
+          Type
+          <select value={form.kind} onChange={(e) => update("kind", e.target.value)}>
+            {KINDS.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Importance
           <select
             value={form.importance}
@@ -110,7 +123,7 @@ export default function QuickAddTask({ spaces, initialSpaceId, onSaved, onCancel
           Cancel
         </button>
         <button type="submit" className="btn" disabled={busy || !form.title.trim() || !form.business_id}>
-          {busy ? "Saving..." : "Save task"}
+          {busy ? "Saving..." : "Save"}
         </button>
       </div>
     </form>

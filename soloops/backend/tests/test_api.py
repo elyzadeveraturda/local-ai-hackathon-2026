@@ -1585,3 +1585,38 @@ def test_migration_links_existing_customer_text(tmp_path):
     assert by_title["b"]["customer"] == " ana "  # original text untouched
     assert by_title["c"]["contact_id"] is None
     assert all(t["kind"] == "task" for t in tasks)
+
+
+def test_match_inventory_by_words():
+    items = [{"id": 1, "name": "Canon EOS R6"}, {"id": 2, "name": "Sony A7 IV"},
+             {"id": 3, "name": "50mm f/1.8 lens"}]
+    assert main.match_inventory("Canon R6", items)["id"] == 1
+    assert main.match_inventory("the sony a7 iv body", items)["id"] == 2
+    assert main.match_inventory("50mm lens", items)["id"] == 3
+    assert main.match_inventory("tripod", items) is None
+    assert main.match_inventory("", items) is None
+
+
+def test_chat_lists_who_owes_money(client):
+    bid = make_business(client)
+    client.post("/tasks", json={"business_id": bid, "title": "Cake order",
+                                "contact_name": "Ana", "amount": 1200,
+                                "payment_status": "partial", "amount_paid": 200})
+    seen = {}
+
+    def fake_post(url, json=None, **kwargs):
+        seen["prompt"] = json["prompt"]
+        return FakeResponse("ok")
+
+    with patch.object(main.requests, "post", side_effect=fake_post):
+        client.post("/chat", json={"message": "who owes me?"})
+    assert 'Ana owes the user PHP 1,000 for "Cake order"' in seen["prompt"]
+
+
+def test_end_time_needs_a_range_in_the_text():
+    base = {"due_date": None, "due_time": "14:00", "end_time": "15:00",
+            "amount": None, "person": None}
+    r = main.apply_extraction_guards(dict(base), "rent the lens on Friday at 2 PM")
+    assert r["end_time"] is None and r["due_time"] == "14:00"
+    for text in ("study group 2 to 4 PM", "shoot 2-3pm", "class 9:00 until 10:30"):
+        assert main.apply_extraction_guards(dict(base), text)["end_time"] == "15:00"
